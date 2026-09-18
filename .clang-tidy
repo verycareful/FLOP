@@ -1,0 +1,33 @@
+# clang-tidy for FLOP. The tree started under this gate, so there is no
+# backlog and every finding is an error. Three families: the two that find
+# defects (bugprone, performance) and the one that keeps C++23 idiom honest
+# (modernize). readability is off: most of it is taste, and taste is what
+# .clang-format is for.
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  -bugprone-easily-swappable-parameters,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays
+
+# Every enabled check is a gate.
+WarningsAsErrors: '*'
+
+# Only FLOP's own headers; GoogleTest and Google Benchmark are fetched and
+# their findings are not ours.
+HeaderFilterRegex: '.*/(include/flop|src|tests|benchmarks)/.*'
+
+FormatStyle: file
+
+CheckOptions:
+  # bugprone-easily-swappable-parameters fires on every (n, m) and (lo, hi)
+  # pair in a numerical library and cannot tell a documented order from an
+  # accident.
+  # modernize-use-trailing-return-type is a style with no defect behind it.
+  # modernize-avoid-c-arrays: a fixed-size C array is the natural spelling of
+  # a small test point (const double x0[2] = {...}) and std::array adds
+  # nothing to it.
+  - key: modernize-use-nodiscard.ReplacementString
+    value: '[[nodiscard]]'

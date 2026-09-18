@@ -1,0 +1,15 @@
+# Build trees, any name starting with build
+/build*/
+
+# Maintainer-local files: plans, notes, outputs, the working-memory file,
+# the AI instruction sheet and the release tooling. None of it ships.
+/local/
+/changes_version.md
+/CLAUDE.md
+/tools/
+
+# Tooling residue
+/.cache/
+/compile_commands.json
+__pycache__/
+*.pyc

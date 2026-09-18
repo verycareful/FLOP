@@ -1,0 +1,14 @@
+# FLOP house style. Applied to every file from the first commit, so the tree
+# never carries a diff against it.
+BasedOnStyle: Google
+Standard: c++20
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AlignTrailingComments: true
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Preserve

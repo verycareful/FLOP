@@ -1,0 +1,94 @@
+# Copyright (c) 2026 Sricharan Suresh (github.com/verycareful)
+# SPDX-License-Identifier: MPL-2.0
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Every leg builds the library and both test variants (strict and fast-math)
+# and runs both. GCC 13 is the floor that bounds the C++23 library surface.
+# The fast-math legs also compile the library itself under -ffast-math, so
+# the facade is exercised under both models across the matrix.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc-13 strict
+            cc: gcc-13
+            cxx: g++-13
+            fast_math: OFF
+          - name: gcc-14 strict
+            cc: gcc-14
+            cxx: g++-14
+            fast_math: OFF
+          - name: gcc-14 fast-math
+            cc: gcc-14
+            cxx: g++-14
+            fast_math: ON
+          - name: clang strict
+            cc: clang
+            cxx: clang++
+            fast_math: OFF
+          - name: clang fast-math
+            cc: clang
+            cxx: clang++
+            fast_math: ON
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ${{ matrix.cc == 'clang' && 'clang' || format('{0} {1}', matrix.cc, matrix.cxx) }}
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DFLOP_BUILD_TESTS=ON
+          -DFLOP_FAST_MATH=${{ matrix.fast_math }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test (strict variant)
+        run: ./build/tests/flop_tests_strict
+
+      - name: Test (fast-math variant)
+        run: ./build/tests/flop_tests_fast
+
+  benchmarks-build:
+    name: benchmarks build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DFLOP_BUILD_TESTS=OFF
+          -DFLOP_BUILD_BENCHMARKS=ON
+      - name: Build
+        run: cmake --build build
+      - name: Smoke run
+        run: ./build/benchmarks/bench_cobyla --benchmark_filter=Unbounded/16 --benchmark_min_time=0.05s
