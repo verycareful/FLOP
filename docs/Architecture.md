@@ -44,7 +44,9 @@ it answers false at the cap. There is no success flag.
 
 Every guard in FLOP survives `-ffast-math`. Finiteness is read from the
 exponent bits of the object representation, by reference, never through a
-by-value double (`flop/detail/fp.hpp`). No infinity or NaN is used as a
+by-value double (`flop/detail/fp.hpp`): under `-ffinite-math-only` clang
+declares every `double` a function returns or takes by value free of NaN and
+infinity, so only a value read from memory can be tested at all. No infinity or NaN is used as a
 sentinel anywhere: a missing bound is an empty `std::optional`, a running
 best is a value plus a validity flag. The test suite is built twice in one
 build, under the strict model and under `-ffast-math`, and both variants must

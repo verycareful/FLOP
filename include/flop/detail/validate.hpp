@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -53,14 +54,16 @@ inline void validate_bounds(const char* where, const Bounds& b, std::span<const 
                         std::to_string(b.upper.size()) + " upper entries for " +
                         std::to_string(x0.size()) + " variables");
     for (std::size_t i = 0; i < x0.size(); ++i) {
-        if (b.lower[i] && fp_bad(*b.lower[i])) fail(where, "a lower bound is non-finite");
-        if (b.upper[i] && fp_bad(*b.upper[i])) fail(where, "an upper bound is non-finite");
-        if (b.lower[i] && b.upper[i] && *b.lower[i] >= *b.upper[i])
+        const std::optional<double>& lo = b.lower[i];
+        const std::optional<double>& hi = b.upper[i];
+        if (lo.has_value() && fp_bad(*lo)) fail(where, "a lower bound is non-finite");
+        if (hi.has_value() && fp_bad(*hi)) fail(where, "an upper bound is non-finite");
+        if (lo.has_value() && hi.has_value() && *lo >= *hi)
             fail(where, "lower bound is not below upper bound at coordinate " + std::to_string(i) +
                             " (a fixed coordinate is not a variable; drop it from x)");
-        if (b.lower[i] && x0[i] < *b.lower[i])
+        if (lo.has_value() && x0[i] < *lo)
             fail(where, "x0 is below the lower bound at coordinate " + std::to_string(i));
-        if (b.upper[i] && x0[i] > *b.upper[i])
+        if (hi.has_value() && x0[i] > *hi)
             fail(where, "x0 is above the upper bound at coordinate " + std::to_string(i));
     }
 }

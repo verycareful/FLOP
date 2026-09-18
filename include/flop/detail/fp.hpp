@@ -47,7 +47,7 @@ namespace flop::detail {
 // those and nothing else.
 constexpr bool fp_bad(const double& x) noexcept {
     static_assert(sizeof(double) == sizeof(std::uint64_t), "fp_bad assumes IEEE-754 binary64");
-    const std::uint64_t bits = std::bit_cast<std::uint64_t>(x);
+    const auto bits = std::bit_cast<std::uint64_t>(x);
     return ((bits >> 52) & UINT64_C(0x7FF)) == UINT64_C(0x7FF);
 }
 

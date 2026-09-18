@@ -41,7 +41,7 @@ struct Bounds {
         return b;
     }
 
-    std::size_t size() const noexcept { return lower.size(); }
+    [[nodiscard]] std::size_t size() const noexcept { return lower.size(); }
 };
 
 }  // namespace flop

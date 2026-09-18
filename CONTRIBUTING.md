@@ -38,9 +38,12 @@ algorithm came from, or that carries another project's code, is not merged.
 ## Tests
 
 Every feature release is followed by a test-only release that pins it. Test
-files are named `test_v<version>_<area>.cpp` with the version of the feature
-they pin, and the suite is built twice, under the strict and the fast-math
-floating-point models; both binaries must pass on every CI leg.
+files are named `test_v<version>_<area>.cpp` with the version of the release
+that ships them (`test_v0101_bounds.cpp` shipped in 0.1.0.1), and the suite
+is built twice, under the strict and the fast-math floating-point models;
+both binaries must pass on every CI leg. A test-only release may ship a test
+red on purpose when it pins a defect the next patch fixes; the changelog
+names every such test.
 
 ## Issues
 

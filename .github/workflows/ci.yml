@@ -46,7 +46,7 @@ jobs:
             cxx: clang++
             fast_math: ON
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install compiler
         run: |
@@ -76,7 +76,7 @@ jobs:
     name: benchmarks build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install
         run: sudo apt-get update && sudo apt-get install -y ninja-build clang
       - name: Configure

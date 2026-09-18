@@ -184,15 +184,17 @@ inline std::size_t build_polyhedron(std::size_t n, std::size_t m, std::span<cons
     std::size_t r = m;
     if (bounds) {
         for (std::size_t i = 0; i < n; ++i) {
-            if (bounds->lower[i]) {
+            const std::optional<double>& lo = bounds->lower[i];
+            const std::optional<double>& hi = bounds->upper[i];
+            if (lo.has_value()) {
                 ws.A[r * n + i] = -1.0;
-                ws.b[r] = xb[i] - *bounds->lower[i];
+                ws.b[r] = xb[i] - *lo;
                 ws.rownorm2[r] = 1.0;
                 ++r;
             }
-            if (bounds->upper[i]) {
+            if (hi.has_value()) {
                 ws.A[r * n + i] = 1.0;
-                ws.b[r] = *bounds->upper[i] - xb[i];
+                ws.b[r] = *hi - xb[i];
                 ws.rownorm2[r] = 1.0;
                 ++r;
             }

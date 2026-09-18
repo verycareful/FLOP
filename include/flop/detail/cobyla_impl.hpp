@@ -44,6 +44,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -227,8 +228,8 @@ private:
     std::span<double> cvals(std::size_t j) {
         return {cval_.data() + j * std::max<std::size_t>(m_, 1), m_};
     }
-    double merit(std::size_t j) const { return fval_[j] + mu_ * viol_[j]; }
-    std::size_t base_index() const { return n_; }
+    [[nodiscard]] double merit(std::size_t j) const { return fval_[j] + mu_ * viol_[j]; }
+    [[nodiscard]] std::size_t base_index() const { return n_; }
 
     // Column j of S becomes d (a displacement from the base). Requires
     // w_j = r_j . d to be non-zero; the caller checks.
@@ -280,10 +281,12 @@ private:
     // The displacement of initial vertex i along coordinate i: +rho when the
     // box allows it, else -rho, else whichever side has more room, shrunk to
     // that room. Without bounds it is always +rho.
-    double initial_offset(std::size_t i) const {
+    [[nodiscard]] double initial_offset(std::size_t i) const {
         if (!bounds_) return rho_;
-        const double up = bounds_->upper[i] ? *bounds_->upper[i] - base_[i] : rho_;
-        const double down = bounds_->lower[i] ? base_[i] - *bounds_->lower[i] : rho_;
+        const std::optional<double>& hi = bounds_->upper[i];
+        const std::optional<double>& lo = bounds_->lower[i];
+        const double up = hi.has_value() ? *hi - base_[i] : rho_;
+        const double down = lo.has_value() ? base_[i] - *lo : rho_;
         if (up >= rho_) return rho_;
         if (down >= rho_) return -rho_;
         return up >= down ? up : -down;
@@ -362,14 +365,14 @@ private:
         return true;
     }
 
-    bool acceptable() const {
+    [[nodiscard]] bool acceptable() const {
         for (std::size_t j = 0; j < n_; ++j)
             if (vsig_[j] < kAlpha * rho_ || veta_[j] > kBeta * rho_) return false;
         return true;
     }
 
     // The linearised merit change for a displacement d from the base.
-    double linear_merit(std::span<const double> d) const {
+    [[nodiscard]] double linear_merit(std::span<const double> d) const {
         double lin = dot(gf_, d);
         if (m_ > 0) {
             double worst = 0.0;
@@ -383,19 +386,19 @@ private:
         }
         return lin;
     }
-    std::span<const double> cvals_const(std::size_t j) const {
+    [[nodiscard]] std::span<const double> cvals_const(std::size_t j) const {
         return {cval_.data() + j * std::max<std::size_t>(m_, 1), m_};
     }
 
     // The largest factor t in (0, 1] with base + t d inside the box.
-    double box_factor(std::span<const double> d) const {
+    [[nodiscard]] double box_factor(std::span<const double> d) const {
         if (!bounds_) return 1.0;
         double t = 1.0;
         for (std::size_t i = 0; i < n_; ++i) {
-            if (d[i] > 0.0 && bounds_->upper[i])
-                t = std::min(t, (*bounds_->upper[i] - base_[i]) / d[i]);
-            if (d[i] < 0.0 && bounds_->lower[i])
-                t = std::min(t, (*bounds_->lower[i] - base_[i]) / d[i]);
+            const std::optional<double>& hi = bounds_->upper[i];
+            const std::optional<double>& lo = bounds_->lower[i];
+            if (d[i] > 0.0 && hi.has_value()) t = std::min(t, (*hi - base_[i]) / d[i]);
+            if (d[i] < 0.0 && lo.has_value()) t = std::min(t, (*lo - base_[i]) / d[i]);
         }
         return std::max(t, 0.0);
     }

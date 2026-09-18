@@ -24,7 +24,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install
         run: sudo apt-get update && sudo apt-get install -y clang-format
       - name: Check
@@ -36,7 +36,7 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install
         run: sudo apt-get update && sudo apt-get install -y clang clang-tidy clang-tools ninja-build
       # Configure only: clang-tidy needs the compile database for each file's

@@ -55,9 +55,10 @@ cost `O(n^2)`. No inverse is ever recomputed.
   projections are Hildreth's cyclic dual coordinate ascent, warm-started
   across the bisection. Simple and correct rather than fast; it is the first
   candidate for an active-set solver.
-- **Batch initial simplex.** With a `BatchObjective`, `x0` and the `n`
-  displaced points go out as one batch and the best of them becomes the base
-  afterwards. With a scalar objective the paper's sequential construction
+- **Batch initial simplex.** With a `BatchObjective`, the `n` displaced
+  points and then `x0`, in that order, go out as one batch and the best of
+  them becomes the base afterwards, so evaluation index `n` is `x0` on this
+  path where index 0 is `x0` on the scalar path. With a scalar objective the paper's sequential construction
   runs, in which the base moves to any vertex that improves on it as the
   simplex is built. The evaluation cap is respected on both paths: a cap
   smaller than `n + 1` forces the sequential path.
@@ -96,8 +97,10 @@ A non-finite objective or constraint value ends the run with
 
 ## Verification against the paper
 
-Every rule below is implemented as described and should be read against the
-paper's text before the first test release pins it:
+The test suite runs the paper's test problems 1 to 9 from the paper's own
+starting points and holds each to its known optimum, which is the evidence
+that the rules as implemented work together. Each rule below should still be
+read against the paper's text:
 
 - The penalty increase when a predicted merit reduction is not positive:
   `mu` is set to twice the value that makes it positive when `mu` is below
@@ -121,8 +124,21 @@ paper's text before the first test release pins it:
 
 ## Limits
 
+- Constraints together with a box do not work. With both present the
+  constrained path leaves the box at some trial points and can end at the
+  unconstrained minimum with the constraint violated (Hock-Schittkowski 24
+  and 35 with their `x >= 0` box both do). Constraints without a box and a
+  box without constraints are each held at every evaluation. The suite pins
+  the combination red.
 - The constrained subproblem solver converges linearly and is capped; on a
   degenerate constraint set the step is inexact, which the trust-region
-  argument tolerates and the radius update absorbs.
-- With `-ffinite-math-only` in the caller's translation unit, a NaN from the
-  objective may never reach memory and cannot be detected there.
+  argument tolerates and the radius update absorbs. It is also slow next to
+  the unconstrained path: about a millisecond per evaluation at a handful
+  of variables with a box present.
+- With `-ffinite-math-only` in the caller's translation unit, a NaN the
+  objective returns may never reach the check. Clang declares every
+  `double` a function returns or takes by value free of NaN and infinity,
+  so such a value is undefined before FLOP sees it; GCC keeps the bits and
+  the check catches them. Values FLOP reads from memory (x0, bounds,
+  tolerances, and constraint values written into the span it provides) are
+  caught under every compiler and model.

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 namespace flop {
@@ -18,7 +19,7 @@ namespace flop {
 // Every run ends with exactly one of these. Reaching the evaluation cap is an
 // outcome like any other and is reported as itself: a caller who wants to know
 // whether the method finished asks converged(), and the cap answers false.
-enum class Status {
+enum class Status : std::uint8_t {
     XtolReached,            // the trust region shrank below the x tolerance
     FtolReached,            // an accepted step changed f by less than the f tolerance
     StopValueReached,       // f fell to or below stop_value
