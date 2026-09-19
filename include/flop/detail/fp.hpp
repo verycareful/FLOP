@@ -59,4 +59,13 @@ constexpr bool any_bad(std::span<const double> v) noexcept {
     return false;
 }
 
+// Turns a negative zero into a positive one and leaves every other value
+// alone. A maximum that starts at 0.0 and meets a -0.0 can hand the sign
+// back when the compiler is free to ignore signed zeros, and a fabs or a
+// comparison written to remove it is subject to the same freedom; the
+// integer test on the bits is not.
+constexpr void drop_negative_zero(double& x) noexcept {
+    if (std::bit_cast<std::uint64_t>(x) == (UINT64_C(1) << 63)) x = 0.0;
+}
+
 }  // namespace flop::detail

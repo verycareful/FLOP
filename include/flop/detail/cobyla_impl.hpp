@@ -67,6 +67,14 @@ struct Options : flop::Options {
     // 0 derives it from the x tolerances: the larger of xtol_abs and
     // xtol_rel * initial_step.
     double final_trust_radius = 0.0;
+    // Let the trust radius grow. The paper's radius rho only ever shrinks,
+    // so along a valley the method crawls at rho per evaluation. With this
+    // on, the step radius Delta doubles after a step whose merit fall is at
+    // least half of the prediction (never past initial_step) and
+    // halves on a failed step down to rho, which keeps the paper's own
+    // schedule as Delta's floor. Off, Delta stays at rho and the method is
+    // the paper's exactly.
+    bool trust_region_growth = true;
 };
 
 }  // namespace flop::cobyla
@@ -82,6 +90,22 @@ constexpr double kAlpha = 0.25;
 constexpr double kBeta = 2.1;
 constexpr double kGamma = 0.5;
 constexpr double kDelta = 1.1;
+
+// The trust radius Delta on top of the paper's rho (Options::
+// trust_region_growth): a step whose merit fall is at least kGrowRatio of
+// the prediction doubles Delta; a failed step halves it, and a Delta within
+// kSnapFactor of rho is rho, mirroring the paper's own rule for rho at the
+// end of its schedule. kGrowRatio is one half rather than the three
+// quarters of Powell's later methods because in ten dimensions the simplex
+// is rarely acceptable and the ratios sit low (median 0.27 on Rosenbrock
+// 10-d), so the higher threshold almost never grows the radius there.
+constexpr double kGrowRatio = 0.5;
+constexpr double kShrink = 0.5;
+constexpr double kSnapFactor = 1.5;
+// Growth also needs the step's merit fall to be at least this fraction of
+// the previous successful step's, which stops the doubling where the
+// reductions are collapsing towards a minimum.
+constexpr double kFallKeep = 0.5;
 
 // A problem with no constraints, so the unconstrained entry points share one
 // solver with the constrained ones.
@@ -126,6 +150,7 @@ public:
           opts_(opts),
           bounds_(opts.bounds ? &*opts.bounds : nullptr) {
         rho_ = opts.initial_step;
+        delta_ = rho_;
         rhoend_ =
             opts.final_trust_radius > 0.0
                 ? opts.final_trust_radius
@@ -200,10 +225,14 @@ private:
                         "flop::cobyla: a constraint returned a non-finite value");
                 viol = std::max(viol, -c[k]);
             }
+            drop_negative_zero(viol);  // a constraint at exactly zero contributes -0.0
         }
         ++evals_;
         if (opts_.on_evaluation) {
-            Evaluation ev{evals_ - 1, x, f, std::span<const double>(c.data(), m_)};
+            Evaluation ev{.index = evals_ - 1,
+                          .x = x,
+                          .f = f,
+                          .constraints = std::span<const double>(c.data(), m_)};
             opts_.on_evaluation(ev);
         }
         if (opts_.stopping.stop_value && f <= *opts_.stopping.stop_value && !done_) {
@@ -302,21 +331,24 @@ private:
         const bool batch = Eval::has_batch && (opts_.stopping.max_evaluations == 0 ||
                                                opts_.stopping.max_evaluations >= n_ + 1);
         if (batch) {
+            // Batch slot 0 is x0 (vertex n, the base), slot j + 1 is the poke
+            // along coordinate j (vertex j), so that evaluation index 0 is
+            // x0 on this path as on the sequential one.
             std::vector<double> points((n_ + 1) * n_);
             std::vector<std::span<const double>> xs(n_ + 1);
             std::vector<double> out(n_ + 1);
-            for (std::size_t j = 0; j <= n_; ++j) {
-                for (std::size_t i = 0; i < n_; ++i) points[j * n_ + i] = base_[i];
-                if (j < n_) points[j * n_ + j] += initial_offset(j);
-                xs[j] = std::span<const double>(points.data() + j * n_, n_);
+            for (std::size_t slot = 0; slot <= n_; ++slot) {
+                for (std::size_t i = 0; i < n_; ++i) points[slot * n_ + i] = base_[i];
+                if (slot > 0) points[slot * n_ + (slot - 1)] += initial_offset(slot - 1);
+                xs[slot] = std::span<const double>(points.data() + slot * n_, n_);
             }
             eval_.batch(xs, out);
-            for (std::size_t j = 0; j <= n_; ++j) {
-                record(xs[j], out[j], cbuf_, f, v);
-                store_vertex(j, f, cbuf_, v);
+            for (std::size_t slot = 0; slot <= n_; ++slot) {
+                record(xs[slot], out[slot], cbuf_, f, v);
+                store_vertex(slot == 0 ? n_ : slot - 1, f, cbuf_, v);
             }
             for (std::size_t j = 0; j < n_; ++j) {
-                for (std::size_t i = 0; i < n_; ++i) d_[i] = points[j * n_ + i] - base_[i];
+                for (std::size_t i = 0; i < n_; ++i) d_[i] = points[(j + 1) * n_ + i] - base_[i];
                 replace_vertex(j, d_);
             }
             if (done_) return;
@@ -367,7 +399,7 @@ private:
 
     [[nodiscard]] bool acceptable() const {
         for (std::size_t j = 0; j < n_; ++j)
-            if (vsig_[j] < kAlpha * rho_ || veta_[j] > kBeta * rho_) return false;
+            if (vsig_[j] < kAlpha * delta_ || veta_[j] > kBeta * delta_) return false;
         return true;
     }
 
@@ -413,7 +445,7 @@ private:
         std::size_t jdrop = 0;
         double worst_eta = 0.0;
         for (std::size_t j = 0; j < n_; ++j)
-            if (veta_[j] > kBeta * rho_ && veta_[j] > worst_eta) {
+            if (veta_[j] > kBeta * delta_ && veta_[j] > worst_eta) {
                 worst_eta = veta_[j];
                 jdrop = j;
             }
@@ -423,7 +455,7 @@ private:
                 if (vsig_[j] < vsig_[jdrop]) jdrop = j;
         }
         auto rj = row(jdrop);
-        const double scale = kGamma * rho_ * vsig_[jdrop];  // gamma rho / |r_j|
+        const double scale = kGamma * delta_ * vsig_[jdrop];  // gamma Delta / |r_j|
         for (std::size_t i = 0; i < n_; ++i) d_[i] = scale * rj[i];
         const double t_plus = box_factor(d_);
         for (std::size_t i = 0; i < n_; ++i) w_[i] = -d_[i];
@@ -469,6 +501,8 @@ private:
         }
         rho_ *= 0.5;
         if (rho_ <= 1.5 * rhoend_) rho_ = rhoend_;
+        delta_ = rho_;
+        have_last_fall_ = false;
         geometry_blocked_ = false;
         if (mu_ > 0.0) {
             bool have_denom = false;
@@ -500,49 +534,56 @@ private:
 
     // Section 2, the branch taken when a trust-region step fails or is too
     // short: repair the simplex first if it is not acceptable, else shrink
-    // the trust region.
+    // the trust region. Delta shrinks first, halving down to rho; rho itself
+    // is cut, by the paper's rule, only once Delta is already at it.
     void after_failed_step() {
+        const bool at_floor = delta_ <= rho_;
+        if (!at_floor) {
+            delta_ = std::max(kShrink * delta_, rho_);
+            if (delta_ <= kSnapFactor * rho_) delta_ = rho_;
+        }
         if (!acceptable_ && !geometry_blocked_) {
             allow_geometry_ = true;
             return;
         }
-        reduce_rho();
+        if (at_floor) reduce_rho();
     }
 
     // Section 2 and 3: one trust-region iteration.
     void trust_region_iteration() {
-        const double viol_pred = trust_region_step(n_, m_, base_, cvals_const(n_), gc_, gf_, rho_,
+        const double viol_pred = trust_region_step(n_, m_, base_, cvals_const(n_), gc_, gf_, delta_,
                                                    bounds_, d_, ws_, fixed_);
         const double dnorm = norm(d_);
-        if (dnorm < 0.5 * rho_) {
+        if (dnorm < 0.5 * delta_) {
             after_failed_step();
             return;
         }
         const double prerec = viol_[n_] - viol_pred;  // predicted fall in the violation
         const double lin_f = dot(gf_, d_);
         double prerem = mu_ * prerec - lin_f;  // predicted fall in the merit
-        if (prerem <= 0.0) {
-            if (prerec > 0.0) {
-                // The penalty is too small for this step to count as progress:
-                // raise it past the value that makes the prediction positive,
-                // then make sure the base is still the vertex of least merit.
-                const double barmu = lin_f / prerec;
-                if (mu_ < 1.5 * barmu) {
-                    mu_ = 2.0 * barmu;
-                    prerem = mu_ * prerec - lin_f;
-                    std::size_t best = n_;
-                    for (std::size_t j = 0; j < n_; ++j)
-                        if (merit(j) < merit(best)) best = j;
-                    if (best != n_) {
-                        move_base(best);
-                        return;
-                    }
+        if (prerec > 0.0 && lin_f > 0.0) {
+            // Section 2: mu-bar = lin_f / prerec is the least penalty at which
+            // the step is predicted to lower the merit. The penalty stays if
+            // it is at least 3/2 mu-bar, else it becomes 2 mu-bar, whether or
+            // not the current prediction is already positive; a raised
+            // penalty can move the vertex of least merit, in which case the
+            // base moves and the iteration starts over.
+            const double barmu = lin_f / prerec;
+            if (mu_ < 1.5 * barmu) {
+                mu_ = 2.0 * barmu;
+                prerem = mu_ * prerec - lin_f;
+                std::size_t best = n_;
+                for (std::size_t j = 0; j < n_; ++j)
+                    if (merit(j) < merit(best)) best = j;
+                if (best != n_) {
+                    move_base(best);
+                    return;
                 }
             }
-            if (prerem <= 0.0) {
-                after_failed_step();
-                return;
-            }
+        }
+        if (prerem <= 0.0) {
+            after_failed_step();
+            return;
         }
 
         // From here the point is a trust-region point: no geometry repair
@@ -578,10 +619,10 @@ private:
                 found = true;
             }
         }
-        double edgmax = kDelta * rho_;
+        double edgmax = kDelta * delta_;
         for (std::size_t j = 0; j < n_; ++j) {
             const double sigbar = std::fabs(w_[j]) * vsig_[j];
-            if (sigbar < kAlpha * rho_ && sigbar < vsig_[j]) continue;
+            if (sigbar < kAlpha * delta_ && sigbar < vsig_[j]) continue;
             double edge;
             if (trured > 0.0) {
                 auto sj = col(j);
@@ -614,7 +655,27 @@ private:
                 }
             }
         }
-        if (replaced && trured > 0.0 && trured >= 0.1 * prerem) return;
+#ifdef FLOP_COBYLA_TRACE
+        std::fprintf(stderr,
+                     "[cobyla]   step |d|/rho=%.3f |g|=%.3g prerem=%.3g trured=%.3g ratio=%.3f "
+                     "jdrop=%zu replaced=%d\n",
+                     dnorm / delta_, norm(gf_), prerem, trured,
+                     prerem != 0.0 ? trured / prerem : 0.0, jdrop, replaced ? 1 : 0);
+#endif
+        if (replaced && trured > 0.0 && trured >= 0.1 * prerem) {
+            // Delta grows only while the actual reductions hold up, each at
+            // least kFallKeep of the previous successful step's: along a
+            // valley each longer step reduces the merit by more, near a
+            // minimum each step by less, and a doubled linear step there
+            // overshoots by construction.
+            if (opts_.trust_region_growth && trured >= kGrowRatio * prerem && have_last_fall_ &&
+                trured >= kFallKeep * last_fall_)
+                delta_ = std::min(2.0 * delta_, opts_.initial_step);
+            last_fall_ = trured;
+            have_last_fall_ = true;
+            return;
+        }
+        have_last_fall_ = false;
         after_failed_step();
     }
 
@@ -658,15 +719,16 @@ private:
                 max_eta = veta_[j];
                 arg_eta = j;
             }
-            if (vsig_[j] < kAlpha * rho_) ++n_sig;
-            if (veta_[j] > kBeta * rho_) ++n_eta;
+            if (vsig_[j] < kAlpha * delta_) ++n_sig;
+            if (veta_[j] > kBeta * delta_) ++n_eta;
         }
-        std::fprintf(stderr,
-                     "[cobyla] evals=%zu rho=%.3g mu=%.3g acceptable=%d allow_geometry=%d "
-                     "min_vsig/rho=%.3f (j=%zu, %zu below alpha) max_veta/rho=%.3f (j=%zu, %zu "
-                     "above beta) f_base=%.6g\n",
-                     evals_, rho_, mu_, acceptable_ ? 1 : 0, allow_geometry_ ? 1 : 0,
-                     min_sig / rho_, arg_sig, n_sig, max_eta / rho_, arg_eta, n_eta, fval_[n_]);
+        std::fprintf(
+            stderr,
+            "[cobyla] evals=%zu rho=%.3g delta=%.3g mu=%.3g acceptable=%d allow_geometry=%d "
+            "min_vsig/rho=%.3f (j=%zu, %zu below alpha) max_veta/rho=%.3f (j=%zu, %zu "
+            "above beta) f_base=%.6g\n",
+            evals_, rho_, delta_, mu_, acceptable_ ? 1 : 0, allow_geometry_ ? 1 : 0,
+            min_sig / delta_, arg_sig, n_sig, max_eta / delta_, arg_eta, n_eta, fval_[n_]);
     }
 #endif
 
@@ -694,6 +756,9 @@ private:
     const Bounds* bounds_;
 
     double rho_ = 0.0, rhoend_ = 0.0, floor_ = 0.0, mu_ = 0.0;
+    double delta_ = 0.0;           // the step radius, rho or above; rho is its floor
+    double last_fall_ = 0.0;       // the merit fall of the previous successful step
+    bool have_last_fall_ = false;  // false after a failed step or a rho cut
     bool rhoend_from_caller_ = false;
     bool allow_geometry_ = false;    // Powell's IBRNCH, inverted: set only by a failed step
     bool acceptable_ = true;         // the simplex as it stood at the top of this iteration

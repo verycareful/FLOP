@@ -8,6 +8,9 @@
 /CLAUDE.md
 /tools/
 
+# Papers the algorithms are written from, publishers' copies: never shipped
+/refs/
+
 # Tooling residue
 /.cache/
 /compile_commands.json

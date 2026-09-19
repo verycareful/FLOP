@@ -13,6 +13,7 @@ box bounds. The algorithm is described in `docs/algorithms/cobyla.md`.
 ```cpp
 struct Options : flop::Options {
     double final_trust_radius = 0.0;   // rhoend; 0 derives it from the x tolerances
+    bool trust_region_growth = true;   // let the step radius grow above rho; false is the paper's method
 };
 ```
 
@@ -39,8 +40,8 @@ Result minimize_batch(F&& f, C&& c, std::size_t n_constraints,
 `f` is called with a point and returns its objective value. `c` is called
 with a point and a span of `n_constraints` doubles and writes the constraint
 values; a point is feasible when every value is at least zero. The batch
-forms use `f(xs, out)` for the initial simplex, `n + 1` independent points,
-and one point at a time afterwards.
+forms use `f(xs, out)` for the initial simplex, `n + 1` independent points
+with `x0` first, and one point at a time afterwards.
 
 Every entry point returns the best point seen with the reason the run ended
 (`docs/api/result.md`).

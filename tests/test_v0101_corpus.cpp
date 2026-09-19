@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -128,6 +129,45 @@ std::size_t replay(const Recording& run) {
     return k;
 }
 
+// The same replay to a tolerance: a point counts as the recorded one when
+// every coordinate is within tol (relative to 1 + |x|) of it, and the
+// recorded energy is handed back for it. Rounding grows slowly along a
+// trajectory and a rule difference moves a whole step at once, so the
+// distance of the first mismatch, in units of the initial step, tells the
+// two apart. Returns the agreed count and that distance.
+struct TolerantReplay {
+    std::size_t agreed;
+    double mismatch_over_step;
+};
+
+TolerantReplay replay_to(const Recording& run, double tol) {
+    std::size_t k = 0;
+    double mismatch = 0.0;
+    auto f = [&](std::span<const double> x) -> double {
+        if (k >= run.x.size()) throw Diverged{k};
+        double worst = 0.0;
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            const double scale = 1.0 + std::fabs(run.x[k][i]);
+            worst = std::max(worst, std::fabs(x[i] - run.x[k][i]) / scale);
+        }
+        if (worst > tol) {
+            mismatch = v0101::max_abs_diff(x, run.x[k]);
+            throw Diverged{k};
+        }
+        return run.f[k++];
+    };
+    flop::cobyla::Options o;
+    o.initial_step = 0.3;
+    o.stopping.max_evaluations = run.x.size();
+    o.stopping.xtol_rel = 1e-12;
+    try {
+        (void)flop::cobyla::minimize(f, run.x[0], o);
+    } catch (const Diverged& d) {
+        return {.agreed = d.agreed, .mismatch_over_step = mismatch / o.initial_step};
+    }
+    return {.agreed = k, .mismatch_over_step = 0.0};
+}
+
 class V0101Corpus : public ::testing::TestWithParam<std::filesystem::path> {};
 
 }  // namespace
@@ -142,6 +182,15 @@ TEST_P(V0101Corpus, TheInitialSimplexReplaysToTheBit) {
     RecordProperty("agreed", static_cast<int>(agreed));
     std::cout << "[ corpus   ] " << run.name << ": n=" << run.n << " recorded=" << run.x.size()
               << " agreed=" << agreed << '\n';
+}
+
+TEST_P(V0101Corpus, TheTrajectoryAgreesToATolerance) {
+    const Recording run = load(GetParam());
+    const TolerantReplay r = replay_to(run, 1e-9);
+    EXPECT_GE(r.agreed, run.n + 1) << run.name;
+    RecordProperty("agreed_1e-9", static_cast<int>(r.agreed));
+    std::cout << "[ corpus   ] " << run.name << ": agreed_1e-9=" << r.agreed << " of "
+              << run.x.size() << " first mismatch " << r.mismatch_over_step << " steps\n";
 }
 
 TEST(V0101CorpusFiles, TheCorpusHoldsNineteenRuns) {

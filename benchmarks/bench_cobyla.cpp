@@ -16,11 +16,15 @@
 // fixed evaluation budget. The numbers to compare against, NLopt 2.7.1's
 // COBYLA on the same host on 2026-09-14: about 3 microseconds per evaluation
 // at 16 parameters, 0.03 to 0.4 ms at 96 unbounded, 0.45 to 0.73 ms at 80
-// with bounds.
+// with bounds. The constrained row adds one linear constraint that is active
+// at the optimum, so the active-set subproblem runs on every iteration;
+// NLopt on that row, same host, 2026-09-19: 2.2 microseconds per evaluation
+// at 16 parameters and 0.25 ms at 80.
 
 #include <benchmark/benchmark.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <numbers>
 #include <span>
 #include <vector>
@@ -35,7 +39,18 @@ double sphere(std::span<const double> x) {
     return s;
 }
 
-void run(benchmark::State& state, bool bounded) {
+// One linear constraint through the sphere's centre, active at the
+// optimum, so every iteration takes the constrained step: the row measures
+// the active-set subproblem, which the unconstrained rows never enter.
+void plane(std::span<const double> x, std::span<double> out) {
+    double s = 0.0;
+    for (double v : x) s += v;
+    out[0] = 0.1 * static_cast<double>(x.size()) - s;
+}
+
+enum class Kind : std::uint8_t { Unbounded, Bounded, Constrained };
+
+void run(benchmark::State& state, Kind kind) {
     const auto n = static_cast<std::size_t>(state.range(0));
     const std::size_t budget = 20 * n;
     std::vector<double> x0(n, 0.5);
@@ -43,13 +58,15 @@ void run(benchmark::State& state, bool bounded) {
     opts.stopping.max_evaluations = budget;
     opts.stopping.xtol_rel = 1e-12;
     opts.initial_step = 0.3;
-    if (bounded) {
+    if (kind == Kind::Bounded) {
         std::vector<double> lo(n, -2.0 * std::numbers::pi), hi(n, 2.0 * std::numbers::pi);
         opts.bounds = flop::Bounds::box(lo, hi);
     }
     std::size_t evaluations = 0;
     for (auto _ : state) {
-        flop::Result r = flop::cobyla::minimize(sphere, x0, opts);
+        flop::Result r = kind == Kind::Constrained
+                             ? flop::cobyla::minimize(sphere, plane, 1, x0, opts)
+                             : flop::cobyla::minimize(sphere, x0, opts);
         benchmark::DoNotOptimize(r);
         evaluations += r.evaluations;
     }
@@ -64,10 +81,13 @@ void run(benchmark::State& state, bool bounded) {
 }
 
 void BM_Cobyla_Unbounded(benchmark::State& state) {
-    run(state, false);
+    run(state, Kind::Unbounded);
 }
 void BM_Cobyla_Bounded(benchmark::State& state) {
-    run(state, true);
+    run(state, Kind::Bounded);
+}
+void BM_Cobyla_Constrained(benchmark::State& state) {
+    run(state, Kind::Constrained);
 }
 
 }  // namespace
@@ -86,5 +106,7 @@ BENCHMARK(BM_Cobyla_Unbounded)
     ->Arg(128);
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 BENCHMARK(BM_Cobyla_Bounded)->Arg(2)->Arg(8)->Arg(16)->Arg(32)->Arg(64)->Arg(80)->Arg(96)->Arg(128);
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(BM_Cobyla_Constrained)->Arg(2)->Arg(8)->Arg(16)->Arg(32)->Arg(64)->Arg(80);
 
 BENCHMARK_MAIN();

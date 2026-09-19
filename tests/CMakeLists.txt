@@ -35,6 +35,10 @@ FetchContent_MakeAvailable(googletest)
 #   status         each Status on a problem built for it; the trace
 #   facade         Minimizer against the template; the version label
 #   fp             the bit-pattern finiteness check; determinism
+#   step           the constrained trust-region subproblem against closed forms
+#   violation      the reported violation never carries a negative zero
+#   paper          Powell's Tables 1 and 2: problems (A) to (J) at his settings
+#   growth         the trust radius that grows, against the paper's that does not
 set(FLOP_TEST_SOURCES
     test_v0101_validation.cpp
     test_v0101_unconstrained.cpp
@@ -45,6 +49,10 @@ set(FLOP_TEST_SOURCES
     test_v0101_status.cpp
     test_v0101_facade.cpp
     test_v0101_fp.cpp
+    test_v0102_step.cpp
+    test_v0102_violation.cpp
+    test_v0102_paper.cpp
+    test_v0102_growth.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines

@@ -279,6 +279,36 @@ inline void hs35_c(std::span<const double> x, std::span<double> out) {
     out[0] = 3.0 - x[0] - x[1] - 2.0 * x[2];
 }
 
+// HS108, Powell's problem (J): the area of a hexagon of unit diameter with
+// its vertices at (x1, x2), (x3, x4), (x5, x6), (x7, x8), (0, x9) and the
+// origin, to be maximised, so the objective is minus the area. Thirteen
+// constraints keep every pair of vertices within unit distance and the
+// three triangles counted positively; x9 >= 0 is the book's bound, carried
+// here as a fourteenth constraint. The optimum has the area of the
+// equilateral triangle counted twice, sqrt(3)/2, and is not unique.
+inline double hs108_f(std::span<const double> x) {
+    return -0.5 *
+           (x[0] * x[3] - x[1] * x[2] + x[2] * x[8] - x[4] * x[8] + x[4] * x[7] - x[5] * x[6]);
+}
+inline void hs108_c(std::span<const double> x, std::span<double> out) {
+    auto sq = [](double v) { return v * v; };
+    out[0] = 1.0 - sq(x[2]) - sq(x[3]);
+    out[1] = 1.0 - sq(x[8]);
+    out[2] = 1.0 - sq(x[4]) - sq(x[5]);
+    out[3] = 1.0 - sq(x[0]) - sq(x[1] - x[8]);
+    out[4] = 1.0 - sq(x[0] - x[4]) - sq(x[1] - x[5]);
+    out[5] = 1.0 - sq(x[0] - x[6]) - sq(x[1] - x[7]);
+    out[6] = 1.0 - sq(x[2] - x[4]) - sq(x[3] - x[5]);
+    out[7] = 1.0 - sq(x[2] - x[6]) - sq(x[3] - x[7]);
+    out[8] = 1.0 - sq(x[6]) - sq(x[7] - x[8]);
+    out[9] = x[0] * x[3] - x[1] * x[2];
+    out[10] = x[2] * x[8];
+    out[11] = -x[4] * x[8];
+    out[12] = x[4] * x[7] - x[5] * x[6];
+    out[13] = x[8];
+}
+constexpr std::size_t kHs108Constraints = 14;
+
 // ---- helpers ---------------------------------------------------------------
 
 // Non-finite values as bit patterns, written into memory the caller owns.
