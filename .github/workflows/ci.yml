@@ -5,10 +5,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-# Every leg builds the library and both test variants (strict and fast-math)
-# and runs both. GCC 13 is the floor that bounds the C++23 library surface.
-# The fast-math legs also compile the library itself under -ffast-math, so
-# the facade is exercised under both models across the matrix.
+# One leg per tree the maintainer builds on the host, so a local sweep and
+# CI verify the same thing. The leg names are the local capture slots:
+#
+#   gcc          the image's default gcc, strict library (the documented build)
+#   gcc14        g++-14, strict library
+#   clang        the image's default clang, strict library
+#   gcc-fastlib  the default gcc with the library itself under -ffast-math,
+#                which exercises the facade's fast-math build
+#
+# Every leg builds both test binaries, flop_tests_strict and flop_tests_fast,
+# and runs both. The ubuntu-26.04 image ships every compiler named here, so
+# nothing is installed.
 
 name: CI
 
@@ -20,38 +28,32 @@ on:
 jobs:
   build-and-test:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: gcc-13 strict
-            cc: gcc-13
-            cxx: g++-13
+          - name: gcc
+            cc: gcc
+            cxx: g++
             fast_math: OFF
-          - name: gcc-14 strict
+          - name: gcc14
             cc: gcc-14
             cxx: g++-14
             fast_math: OFF
-          - name: gcc-14 fast-math
-            cc: gcc-14
-            cxx: g++-14
-            fast_math: ON
-          - name: clang strict
+          - name: clang
             cc: clang
             cxx: clang++
             fast_math: OFF
-          - name: clang fast-math
-            cc: clang
-            cxx: clang++
+          - name: gcc-fastlib
+            cc: gcc
+            cxx: g++
             fast_math: ON
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build ${{ matrix.cc == 'clang' && 'clang' || format('{0} {1}', matrix.cc, matrix.cxx) }}
+      - name: Compiler version
+        run: ${{ matrix.cxx }} --version
 
       - name: Configure
         env:
@@ -74,15 +76,10 @@ jobs:
 
   benchmarks-build:
     name: benchmarks build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
-      - name: Install
-        run: sudo apt-get update && sudo apt-get install -y ninja-build clang
       - name: Configure
-        env:
-          CC: clang
-          CXX: clang++
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release

@@ -7,6 +7,50 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.0.3] - 2026-09-19 16:59 IST
+
+The 0.1.0.2 CI run was red on one leg out of six: GCC 13, the `-ffast-math`
+test binary, one test. The library was right and the test was not, and the
+leg that caught it was one I never build here. This release fixes the test
+so that it pins what it means to pin, and makes CI build exactly the four
+trees I build on my own machine, so that a green run here is the same
+statement as a green run there.
+
+### Changed
+
+- CI builds the four trees the library is developed under and nothing
+  else: the default GCC and the default clang of the image, `g++-14`, and
+  the default GCC with the library itself under `-ffast-math`. Every leg
+  still builds and runs both test binaries. The image is `ubuntu-26.04`,
+  which ships every compiler named, so no leg installs anything. The lint
+  workflow runs `clang-format` and `clang-tidy` 22 on the same image, the
+  version the tree is formatted and tidied with. GCC 13 and clang 18 are
+  no longer built anywhere, and the stated requirement follows what is
+  verified: GCC 14 or later, clang 20 or later.
+
+### Fixed
+
+- `V0101Constrained.TheViolationReportedIsTheViolationAtTheReturnedPoint`
+  evaluated Rosen-Suzuki's constraint polynomials a second time at the
+  returned point and asked for bit equality with the value the library
+  reports. Under `-ffast-math` a compiler may round the two call sites
+  differently, and GCC 13 does, so the test failed on that leg while the
+  library reported exactly the violation of the point it returned. The
+  test now records every evaluation through `Options::on_evaluation`,
+  requires the returned point to be bit-identical to one it recorded, and
+  rebuilds the violation from that record's constraint values with negation
+  and a comparison only, which no floating-point model can reorder. The
+  pin is stronger for it: it also fails if the returned point was never
+  evaluated.
+
+### Results
+
+168 tests across 14 suites, all passed in both binaries, strict and
+-ffast-math, on every tree (0.2 s per binary; Linux x86-64; GCC 16.2.1, GCC
+14.3.1, clang 22.1.8, and GCC 16.2.1 with the library under -ffast-math).
+The clang -ffast-math binary skips the one test that hands a NaN back
+through the objective's return value, as in 0.1.0.1 and 0.1.0.2.
+
 ## [0.1.0.2] - 2026-09-19 13:48 IST
 
 The patch the test release asked for, and then the release that makes

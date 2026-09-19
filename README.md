@@ -8,7 +8,7 @@
 <!-- CI -->
 [![CI](https://github.com/verycareful/FLOP/actions/workflows/ci.yml/badge.svg)](https://github.com/verycareful/FLOP/actions/workflows/ci.yml)
 <!-- Release -->
-[![Version](https://img.shields.io/badge/version-0.1.0.2-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0.3-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-brightgreen)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Early%20Development-orange)](https://github.com/verycareful/FLOP)
 
@@ -90,7 +90,7 @@ target_link_libraries(your_target PRIVATE flop::flop)
 
 ## Requirements
 
-A C++23 compiler (GCC 13 or later, Clang 18 or later), CMake 3.25 or later.
+A C++23 compiler (GCC 14 or later, Clang 20 or later), CMake 3.25 or later.
 GoogleTest and Google Benchmark are fetched at configure time when their
 targets are enabled.
 

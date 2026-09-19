@@ -160,13 +160,33 @@ TEST(V0101Constrained, AnInfeasibleStartEndsFeasible) {
 }
 
 TEST(V0101Constrained, TheViolationReportedIsTheViolationAtTheReturnedPoint) {
+    // Every evaluation is recorded as it happens through on_evaluation, and
+    // the returned x is matched against the records bit for bit. That checks
+    // two things: the returned point is one the optimizer evaluated, and the
+    // violation it reports is that point's. The violation is rebuilt from the
+    // recorded c(x) with negation and a strict comparison, which no
+    // floating-point model can reorder, so the pin is on a copy of the
+    // library's own numbers. Evaluating the constraint polynomials again
+    // here would not do: -ffast-math may round the second call site
+    // differently from the one inside the optimizer.
     const v0101::Constrained p = v0101::powell_1994_problems()[7];
-    const flop::Result r =
-        flop::cobyla::minimize(p.f, p.c, p.m, p.x0, v0101::options(kStep, 2e-9, 20000));
-    std::vector<double> cv(p.m);
-    p.c(r.x, cv);
+    struct Record {
+        std::vector<double> x;
+        std::vector<double> c;
+    };
+    std::vector<Record> records;
+    flop::cobyla::Options o = v0101::options(kStep, 2e-9, 20000);
+    o.on_evaluation = [&records](const flop::Evaluation& ev) {
+        records.push_back({.x = std::vector<double>(ev.x.begin(), ev.x.end()),
+                           .c = std::vector<double>(ev.constraints.begin(), ev.constraints.end())});
+    };
+    const flop::Result r = flop::cobyla::minimize(p.f, p.c, p.m, p.x0, o);
+    const auto hit = std::ranges::find_if(
+        records, [&r](const Record& rec) { return v0101::same_bits(rec.x, r.x); });
+    ASSERT_NE(hit, records.end()) << "the returned point was never evaluated";
     double viol = 0.0;
-    for (const double v : cv) viol = std::max(viol, -v);
+    for (const double v : hit->c)
+        if (-v > viol) viol = -v;  // +0.0 is never replaced by -0.0
     EXPECT_TRUE(v0101::same_bits(r.max_constraint_violation, viol));
 }
 
