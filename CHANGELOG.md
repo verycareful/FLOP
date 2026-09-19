@@ -7,6 +7,43 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.0.4] - 2026-09-19 17:16 IST
+
+One test, the third time. It was red on GCC 13 in the 0.1.0.2 run and red
+on clang 21 in the 0.1.0.3 run, both times in the `-ffast-math` binary
+only, and the 0.1.0.3 rewrite did not touch the cause because I had the
+cause wrong. This release has it right, with the evidence, and the test
+now pins what it means to pin.
+
+### Fixed
+
+- `V0101Constrained.TheViolationReportedIsTheViolationAtTheReturnedPoint`
+  rebuilt the violation at the returned point as a maximum taken from zero
+  and asked for bit equality with the value the library reports. At that
+  point Rosen-Suzuki's constraint values sit at the rounding floor, a few
+  units of 1e-15, and one is often exactly `+0.0`: clang 22 under
+  `-ffast-math` returns a point with `c[0]` at bits zero on my machine. When
+  no constraint is violated the true violation is zero and the two sides
+  can differ only in the zero's sign. The library reports `+0.0` by bits;
+  under `-fno-signed-zeros` a compiler may compile the test's maximum as a
+  max instruction that returns either zero, and GCC 13 and clang 21 do,
+  while GCC 14, GCC 15, GCC 16 and clang 22 keep the branch. The 0.1.0.3
+  entry attributed the failure to a second evaluation of the constraints
+  rounding differently; that rewrite pinned a copy of the library's own
+  values and failed the same way, which is what ruled the account out.
+  The test keeps the record of every evaluation and the requirement that
+  the returned point be one of them, and now admits only strictly violated
+  constraints to the maximum, so every value compared is strictly positive
+  and a feasible point yields the literal `0.0`.
+
+### Results
+
+168 tests across 14 suites, all passed in both binaries, strict and
+-ffast-math, on every tree (0.2 s per binary; Linux x86-64; GCC 16.2.1, GCC
+14.3.1, clang 22.1.8, and GCC 16.2.1 with the library under -ffast-math).
+The clang -ffast-math binary skips the one test that hands a NaN back
+through the objective's return value, as in the three releases before.
+
 ## [0.1.0.3] - 2026-09-19 16:59 IST
 
 The 0.1.0.2 CI run was red on one leg out of six: GCC 13, the `-ffast-math`

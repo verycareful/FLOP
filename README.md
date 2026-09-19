@@ -8,7 +8,7 @@
 <!-- CI -->
 [![CI](https://github.com/verycareful/FLOP/actions/workflows/ci.yml/badge.svg)](https://github.com/verycareful/FLOP/actions/workflows/ci.yml)
 <!-- Release -->
-[![Version](https://img.shields.io/badge/version-0.1.0.3-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0.4-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-brightgreen)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Early%20Development-orange)](https://github.com/verycareful/FLOP)
 

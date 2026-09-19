@@ -164,11 +164,17 @@ TEST(V0101Constrained, TheViolationReportedIsTheViolationAtTheReturnedPoint) {
     // the returned x is matched against the records bit for bit. That checks
     // two things: the returned point is one the optimizer evaluated, and the
     // violation it reports is that point's. The violation is rebuilt from the
-    // recorded c(x) with negation and a strict comparison, which no
-    // floating-point model can reorder, so the pin is on a copy of the
-    // library's own numbers. Evaluating the constraint polynomials again
-    // here would not do: -ffast-math may round the second call site
-    // differently from the one inside the optimizer.
+    // recorded c(x), so the pin is on a copy of the library's own numbers
+    // and not on a second evaluation of the constraint polynomials, whose
+    // rounding a compiler may order differently at each call site.
+    //
+    // At the returned point the constraint values sit at the rounding floor
+    // and one is often exactly zero, so the rebuilt maximum admits only
+    // strictly violated constraints: every value it compares is strictly
+    // positive, and a feasible point yields the literal 0.0. A maximum that
+    // let -0.0 in would not do, because under -fno-signed-zeros a compiler
+    // may compile a compare-and-assign as a max instruction that returns
+    // either zero, while the library reports +0.0 by bits.
     const v0101::Constrained p = v0101::powell_1994_problems()[7];
     struct Record {
         std::vector<double> x;
@@ -184,10 +190,17 @@ TEST(V0101Constrained, TheViolationReportedIsTheViolationAtTheReturnedPoint) {
     const auto hit = std::ranges::find_if(
         records, [&r](const Record& rec) { return v0101::same_bits(rec.x, r.x); });
     ASSERT_NE(hit, records.end()) << "the returned point was never evaluated";
-    double viol = 0.0;
-    for (const double v : hit->c)
-        if (-v > viol) viol = -v;  // +0.0 is never replaced by -0.0
-    EXPECT_TRUE(v0101::same_bits(r.max_constraint_violation, viol));
+    bool violated = false;
+    double worst = 0.0;
+    for (const double v : hit->c) {
+        if (v < 0.0 && (!violated || -v > worst)) {
+            worst = -v;
+            violated = true;
+        }
+    }
+    const double viol = violated ? worst : 0.0;
+    EXPECT_TRUE(v0101::same_bits(r.max_constraint_violation, viol))
+        << "reported " << r.max_constraint_violation << ", at the point " << viol;
 }
 
 TEST(V0101Constrained, AnInactiveConstraintChangesNothingButTheCount) {
