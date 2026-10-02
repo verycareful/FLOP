@@ -12,8 +12,8 @@ The settings every algorithm shares.
 ```cpp
 struct Stopping {
     std::size_t max_evaluations = 0;   // 0 = no cap
-    double xtol_rel = 0.0;             // rho stops at xtol_rel * initial_step
-    double xtol_abs = 0.0;             // absolute floor on rho
+    double xtol_rel = 0.0;             // the radius stops at xtol_rel * initial_step
+    double xtol_abs = 0.0;             // absolute floor on the radius
     double ftol_rel = 0.0;             // relative to |f|
     double ftol_abs = 0.0;
     std::optional<double> stop_value;  // stop as soon as f <= stop_value
@@ -22,9 +22,14 @@ struct Stopping {
 
 At least one criterion must be set; validation throws otherwise, because a
 method with no stopping rule would run forever. `max_evaluations` is checked
-before every evaluation and counts batch points singly. The x tolerances act
-on the trust-region radius, the f tolerances on the fall in `f` across a
-step that moves the base, and `stop_value` after every evaluation.
+before every evaluation and counts batch points singly. `stop_value` is
+tested after every evaluation. The x and f tolerances act on the scale and
+the progress each algorithm has:
+
+| | x tolerances | f tolerances |
+|---|---|---|
+| COBYLA | the trust-region radius `rho` | the fall in `f` across a step that moves the base |
+| Nelder-Mead | the simplex radius | the spread of `f` over the simplex |
 
 ## Bounds
 
@@ -55,7 +60,8 @@ struct Options {
 };
 ```
 
-`initial_step` is the first step along each coordinate (Powell's `rhobeg`).
+`initial_step` is the first step along each coordinate (COBYLA's `rhobeg`,
+the edge of Nelder-Mead's initial simplex).
 The default fits a problem scaled around unity; there is no rule deriving it
 from `x0`.
 

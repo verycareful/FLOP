@@ -51,7 +51,7 @@ TEST(V0101Status, XtolReachedWhenTheRadiusReachesTheCallersFloor) {
     EXPECT_EQ(r.status, flop::Status::XtolReached);
     // The final radius is the floor the caller asked for, rho_end =
     // xtol_rel * initial_step, to the rounding of the halvings that reach it.
-    EXPECT_NEAR(r.final_trust_radius, 1e-6 * 0.3, 1e-6 * 0.3 * 0.5);
+    EXPECT_NEAR(r.final_radius, 1e-6 * 0.3, 1e-6 * 0.3 * 0.5);
 }
 
 TEST(V0101Status, XtolAbsIsAnAbsoluteFloorOnTheRadius) {
@@ -61,7 +61,7 @@ TEST(V0101Status, XtolAbsIsAnAbsoluteFloorOnTheRadius) {
     o.stopping.xtol_abs = 1e-4;
     const flop::Result r = flop::cobyla::minimize(v0101::sphere, x0, o);
     EXPECT_EQ(r.status, flop::Status::XtolReached);
-    EXPECT_NEAR(r.final_trust_radius, 1e-4, 0.5e-4);
+    EXPECT_NEAR(r.final_radius, 1e-4, 0.5e-4);
 }
 
 TEST(V0101Status, TheLargerOfTheTwoXTolerancesWins) {
@@ -72,7 +72,7 @@ TEST(V0101Status, TheLargerOfTheTwoXTolerancesWins) {
     o.stopping.xtol_abs = 1e-3;
     const flop::Result r = flop::cobyla::minimize(v0101::sphere, x0, o);
     EXPECT_EQ(r.status, flop::Status::XtolReached);
-    EXPECT_NEAR(r.final_trust_radius, 1e-3, 0.5e-3);
+    EXPECT_NEAR(r.final_radius, 1e-3, 0.5e-3);
 }
 
 TEST(V0101Status, FinalTrustRadiusOverridesTheTolerances) {
@@ -83,7 +83,7 @@ TEST(V0101Status, FinalTrustRadiusOverridesTheTolerances) {
     o.final_trust_radius = 1e-2;
     const flop::Result r = flop::cobyla::minimize(v0101::sphere, x0, o);
     EXPECT_EQ(r.status, flop::Status::XtolReached);
-    EXPECT_NEAR(r.final_trust_radius, 1e-2, 0.5e-2);
+    EXPECT_NEAR(r.final_radius, 1e-2, 0.5e-2);
 }
 
 TEST(V0101Status, FtolReachedWhenAnAcceptedStepChangesFByLessThanTheTolerance) {

@@ -33,13 +33,16 @@ struct Result {
     double f;
     std::size_t evaluations;
     Status status;
-    double final_trust_radius;
+    double final_radius;
     double max_constraint_violation;
 };
 ```
 
 `x` is the best point seen, feasible when one was found, and `f` its value.
-`evaluations` counts objective calls, batch points singly.
+`evaluations` counts objective calls, batch points singly. `final_radius` is
+the scale the method had reached when it stopped, the quantity the x
+tolerances act on: COBYLA's trust radius `rho`, Nelder-Mead's simplex
+radius.
 `max_constraint_violation` is `max(0, -min_i c_i(x))`, zero without
 constraints.
 

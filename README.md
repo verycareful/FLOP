@@ -16,10 +16,15 @@ Fast Library of Optimization Procedures: derivative-free optimizers for
 objectives that are expensive to evaluate, written in C++23 from the
 published algorithms, with no dependency at run time.
 
-The first algorithm is Powell's COBYLA, with inequality constraints, box
-bounds, a batch channel for the independent points of its initial simplex,
-and a trace of every evaluation. Nelder-Mead, BOBYQA, SPSA and gradient and
-population methods follow on the same interface.
+Two algorithms so far, both with box bounds, a batch channel for the
+points they can evaluate independently, and a trace of every evaluation:
+
+- Powell's COBYLA, with inequality constraints.
+- Nelder-Mead, in the statement of Lagarias, Reeds, Wright and Wright, with
+  Gao and Han's coefficients for higher dimensions.
+
+BOBYQA, SPSA and gradient and population methods follow on the same
+interface.
 
 ## Design in one paragraph
 
@@ -27,8 +32,8 @@ An algorithm is a class template on the objective, so an evaluation inlines
 into the optimizer loop; concepts (`ScalarObjective`, `BatchObjective`,
 `ConstraintFunction`) say what an objective must offer, and an objective that
 lacks a capability fails to compile. One type-erased facade,
-`flop::Minimizer::create("COBYLA")`, serves the caller who chooses at run
-time. A run returns the best point with a `Status` that names why it
+`flop::Minimizer::create("COBYLA")` or `create("NELDER_MEAD")`, serves the
+caller who chooses at run time. A run returns the best point with a `Status` that names why it
 stopped; reaching the evaluation cap is a status, not a success, and there
 is no flag that says otherwise. Every guard survives `-ffast-math`: the
 suite is built under the strict and the fast-math models in one build and
@@ -84,8 +89,8 @@ target_link_libraries(your_target PRIVATE flop::flop)
 
 - `docs/Architecture.md`: the design, and how an algorithm is added.
 - `docs/api/`: one page per public header.
-- `docs/algorithms/cobyla.md`: the method as implemented, with every
-  deviation from the paper named.
+- `docs/algorithms/`: one page per method as implemented, with every
+  deviation from its paper named.
 - `CONTRIBUTING.md`: how to contribute, and the provenance rule.
 
 ## Requirements
