@@ -51,7 +51,7 @@ template <ScalarObjective F>
 [[nodiscard]] Result minimize(F&& f, std::span<const double> x0, const Options& opts) {
     detail::validate_options("flop::cobyla::minimize", opts, x0);
     detail::cobyla::NoConstraints none;
-    detail::cobyla::Solver<detail::cobyla::ScalarEvaluator<std::remove_reference_t<F>>,
+    detail::cobyla::Solver<detail::ScalarEvaluator<std::remove_reference_t<F>>,
                            detail::cobyla::NoConstraints>
         solver({f}, none, 0, x0, opts);
     return solver.run();
@@ -63,7 +63,7 @@ template <ScalarObjective F, ConstraintFunction C>
 [[nodiscard]] Result minimize(F&& f, C&& c, std::size_t n_constraints, std::span<const double> x0,
                               const Options& opts) {
     detail::validate_options("flop::cobyla::minimize", opts, x0);
-    detail::cobyla::Solver<detail::cobyla::ScalarEvaluator<std::remove_reference_t<F>>,
+    detail::cobyla::Solver<detail::ScalarEvaluator<std::remove_reference_t<F>>,
                            std::remove_reference_t<C>>
         solver({f}, c, n_constraints, x0, opts);
     return solver.run();
@@ -75,7 +75,7 @@ template <BatchObjective F>
 [[nodiscard]] Result minimize_batch(F&& f, std::span<const double> x0, const Options& opts) {
     detail::validate_options("flop::cobyla::minimize_batch", opts, x0);
     detail::cobyla::NoConstraints none;
-    detail::cobyla::Solver<detail::cobyla::BatchEvaluator<std::remove_reference_t<F>>,
+    detail::cobyla::Solver<detail::BatchEvaluator<std::remove_reference_t<F>>,
                            detail::cobyla::NoConstraints>
         solver({f}, none, 0, x0, opts);
     return solver.run();
@@ -85,7 +85,7 @@ template <BatchObjective F, ConstraintFunction C>
 [[nodiscard]] Result minimize_batch(F&& f, C&& c, std::size_t n_constraints,
                                     std::span<const double> x0, const Options& opts) {
     detail::validate_options("flop::cobyla::minimize_batch", opts, x0);
-    detail::cobyla::Solver<detail::cobyla::BatchEvaluator<std::remove_reference_t<F>>,
+    detail::cobyla::Solver<detail::BatchEvaluator<std::remove_reference_t<F>>,
                            std::remove_reference_t<C>>
         solver({f}, c, n_constraints, x0, opts);
     return solver.run();

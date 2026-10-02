@@ -15,8 +15,9 @@ fast path. They are constrained by concepts in `flop/concepts.hpp`:
 - `ScalarObjective`: `f(x) -> double` for `std::span<const double> x`.
 - `BatchObjective`: `f(xs, out)` evaluates every point of `xs` and writes one
   value per point. FLOP uses it where an algorithm has independent points to
-  evaluate; COBYLA's initial simplex is one such place. FLOP never spawns a
-  thread; the caller decides how a batch is evaluated.
+  evaluate: COBYLA's initial simplex, Nelder-Mead's initial simplex and
+  each of its shrinks. FLOP never spawns a thread; the caller decides how a
+  batch is evaluated.
 - `ConstraintFunction`: `c(x, out)` writes the constraint values, feasible
   when every value is at least zero.
 
@@ -34,7 +35,14 @@ Every algorithm takes `flop::Options` (stopping rules, optional box bounds,
 the initial step, an evaluation trace) and returns `flop::Result` (the best
 point, its value, the evaluation count, a `Status`, the final trust radius,
 the largest constraint violation). Algorithm-specific settings extend
-`flop::Options` by inheritance, as `flop::cobyla::Options` does.
+`flop::Options` by inheritance, as `flop::cobyla::Options` and
+`flop::nelder_mead::Options` do.
+
+What more than one algorithm needs lives under `flop/detail/` once:
+`evaluator.hpp` puts the scalar and the batch objective behind one
+interface, so a solver is written once for both channels; `box.hpp` holds
+the initial-simplex offset that respects a box and the projection onto it;
+`validate.hpp` holds every check made at entry.
 
 `Status` names why the run stopped. Reaching the evaluation cap is a status
 like any other; `flop::converged(status)` is the question a caller means and
@@ -62,6 +70,9 @@ may not depend on the model at all.
    section, with no random state unless the method is stochastic by
    definition, and no arithmetic that depends on the floating-point model.
 3. One `Impl` in `src/minimizer.cpp`, one entry in the name list, one line in
-   `Minimizer::create`.
+   `Minimizer::create`. The `Impl` overrides the setters of its own options;
+   the base versions throw, so a setter meant for another algorithm fails
+   loudly. An algorithm without nonlinear constraints throws from the
+   constrained overloads before any evaluation.
 4. An algorithm page under `docs/algorithms/`, an API page for the header,
    tests in the next test release, and a benchmark row.

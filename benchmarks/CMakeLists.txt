@@ -18,3 +18,7 @@ FetchContent_MakeAvailable(benchmark)
 add_executable(bench_cobyla bench_cobyla.cpp)
 target_link_libraries(bench_cobyla PRIVATE flop::flop benchmark::benchmark)
 target_compile_options(bench_cobyla PRIVATE ${FLOP_WARNING_FLAGS} ${FLOP_STRICT_FP_FLAGS})
+
+add_executable(bench_nelder_mead bench_nelder_mead.cpp)
+target_link_libraries(bench_nelder_mead PRIVATE flop::flop benchmark::benchmark)
+target_compile_options(bench_nelder_mead PRIVATE ${FLOP_WARNING_FLAGS} ${FLOP_STRICT_FP_FLAGS})
