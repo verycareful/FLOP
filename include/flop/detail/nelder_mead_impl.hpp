@@ -192,7 +192,7 @@ private:
             opts_.on_evaluation(ev);
         }
         if (!have_best_ || f < best_f_) {
-            std::copy(x.begin(), x.end(), best_x_.begin());
+            std::ranges::copy(x, best_x_.begin());
             best_f_ = f;
             have_best_ = true;
         }
@@ -239,7 +239,7 @@ private:
         const std::span<const double> base = vertex(0);
         for (std::size_t j = 1; j <= n_; ++j) {
             auto v = vertex(j);
-            std::copy(base.begin(), base.end(), v.begin());
+            std::ranges::copy(base, v.begin());
             v[j - 1] += axis_offset(bounds_, base, j - 1, opts_.initial_step);
         }
         for (std::size_t j = 0; j <= n_; ++j) order_[j] = j;
@@ -255,14 +255,14 @@ private:
     // vertex that was best first, which is the paper's one rule for a shrink:
     // if a new vertex ties with x_1, x_1 stays first.
     void rank_all() {
-        std::stable_sort(order_.begin(), order_.end(),
-                         [this](std::size_t a, std::size_t b) { return fval_[a] < fval_[b]; });
+        std::ranges::stable_sort(
+            order_, [this](std::size_t a, std::size_t b) { return fval_[a] < fval_[b]; });
         rebuild_sum();
         rebuild_extents();
     }
 
     void rebuild_sum() {
-        std::fill(sum_.begin(), sum_.end(), 0.0);
+        std::ranges::fill(sum_, 0.0);
         for (std::size_t s = 0; s <= n_; ++s) {
             const auto v = vertex(s);
             for (std::size_t i = 0; i < n_; ++i) sum_[i] += v[i];
@@ -494,7 +494,7 @@ private:
             for (std::size_t s = 0; s <= n_ && flat; ++s) flat = vertex(s)[i] == xi;
             if (!flat) continue;
             const auto b = vertex(best);
-            std::copy(b.begin(), b.end(), xt_.begin());
+            std::ranges::copy(b, xt_.begin());
             if (at_lo)
                 xt_[i] = hi.has_value() ? std::min(xi + h, *hi) : xi + h;
             else
@@ -503,7 +503,7 @@ private:
             if (!evaluate(xt_, f) || done_) return true;
             if (f < fval_[best]) {
                 auto v0 = vertex(0);
-                std::copy(xt_.begin(), xt_.end(), v0.begin());
+                std::ranges::copy(xt_, v0.begin());
                 fval_[0] = f;
                 build_simplex(true);
                 return true;
