@@ -24,10 +24,11 @@ struct Options {
     Stopping stopping;
     std::optional<Bounds> bounds;
 
-    // The initial trust-region radius, Powell's rhobeg: the size of the first
-    // step along each coordinate. 1.0 fits a problem scaled around unity, which
-    // a problem in radians is. There is no rule deriving it from x0; a caller
-    // whose coordinates differ in scale rescales the problem.
+    // The size of the first step along each coordinate: COBYLA's initial
+    // trust radius (Powell's rhobeg), the edge of Nelder-Mead's initial
+    // simplex. 1.0 fits a problem scaled around unity, which a problem in
+    // radians is. There is no rule deriving it from x0; a caller whose
+    // coordinates differ in scale rescales the problem.
     double initial_step = 1.0;
 
     // Called once per objective evaluation, in evaluation order, with the

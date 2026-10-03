@@ -21,12 +21,12 @@
 
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <span>
 #include <string_view>
 
-#include "flop/cobyla.hpp"
 #include "flop/options.hpp"
 #include "flop/result.hpp"
 
@@ -39,16 +39,25 @@ public:
         std::function<void(std::span<const std::span<const double>>, std::span<double>)>;
     using Constraints = std::function<void(std::span<const double>, std::span<double>)>;
 
-    // "COBYLA". Case-sensitive. Unknown names throw std::invalid_argument.
+    // "COBYLA" or "NELDER_MEAD". Case-sensitive. Unknown names throw
+    // std::invalid_argument.
     static Minimizer create(std::string_view name);
     static std::span<const std::string_view> names() noexcept;
 
     [[nodiscard]] std::string_view name() const noexcept;
 
-    // The algorithm's own options, beyond the shared flop::Options. For
-    // COBYLA: final_trust_radius. Every algorithm accepts the shared set.
+    // The algorithm's own options, beyond the shared flop::Options. Every
+    // algorithm accepts the shared set; a setter for an option the selected
+    // algorithm does not have throws std::invalid_argument rather than
+    // storing a value nothing would read.
+    //   COBYLA       set_final_trust_radius (Powell's rhoend)
+    //   NELDER_MEAD  set_adaptive_coefficients (Gao and Han's, on by default)
     Minimizer& set_final_trust_radius(double rhoend);
+    Minimizer& set_adaptive_coefficients(bool adaptive);
 
+    // The constraint overloads throw std::invalid_argument, before any
+    // evaluation, for an algorithm without nonlinear constraints
+    // (NELDER_MEAD).
     [[nodiscard]] Result minimize(const Objective& f, std::span<const double> x0,
                                   const Options& opts) const;
     [[nodiscard]] Result minimize(const Objective& f, const Constraints& c,

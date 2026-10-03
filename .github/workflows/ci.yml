@@ -88,4 +88,6 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Smoke run
-        run: ./build/benchmarks/bench_cobyla --benchmark_filter=Unbounded/16 --benchmark_min_time=0.05s
+        run: |
+          ./build/benchmarks/bench_cobyla --benchmark_filter=Unbounded/16 --benchmark_min_time=0.05s
+          ./build/benchmarks/bench_nelder_mead --benchmark_filter=Unbounded/16 --benchmark_min_time=0.05s

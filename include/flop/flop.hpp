@@ -15,6 +15,7 @@
 #include "flop/cobyla.hpp"
 #include "flop/concepts.hpp"
 #include "flop/minimizer.hpp"
+#include "flop/nelder_mead.hpp"
 #include "flop/options.hpp"
 #include "flop/result.hpp"
 #include "flop/status.hpp"

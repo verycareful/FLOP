@@ -132,7 +132,7 @@ TEST(V0101Facade, SetFinalTrustRadiusReachesTheSolver) {
     const flop::Minimizer::Objective fo = v0101::sphere;
     const flop::Result r = m.minimize(fo, x0, v0101::options(0.3, 1e-9, 5000));
     EXPECT_EQ(r.status, flop::Status::XtolReached);
-    EXPECT_NEAR(r.final_trust_radius, 1e-2, 0.5e-2);
+    EXPECT_NEAR(r.final_radius, 1e-2, 0.5e-2);
 }
 
 TEST(V0101Facade, AMinimizerIsMovable) {

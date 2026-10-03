@@ -34,7 +34,10 @@ struct Result {
     double f = 0.0;               // the objective there
     std::size_t evaluations = 0;  // objective calls made, batch points counted singly
     Status status = Status::RoundoffLimited;
-    double final_trust_radius = 0.0;        // rho at exit; the paper's user would ask for it
+    // The scale the method had reached when it stopped: COBYLA's trust radius
+    // rho, Nelder-Mead's simplex radius (the largest coordinate distance from a
+    // vertex to the best one). The x tolerances act on this quantity.
+    double final_radius = 0.0;
     double max_constraint_violation = 0.0;  // max(0, -min_i c_i(x)); 0 without constraints
 };
 

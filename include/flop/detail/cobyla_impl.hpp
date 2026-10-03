@@ -54,7 +54,9 @@
 #endif
 
 #include "flop/concepts.hpp"
+#include "flop/detail/box.hpp"
 #include "flop/detail/cobyla_step.hpp"
+#include "flop/detail/evaluator.hpp"
 #include "flop/detail/fp.hpp"
 #include "flop/options.hpp"
 #include "flop/result.hpp"
@@ -111,31 +113,6 @@ constexpr double kFallKeep = 0.5;
 // solver with the constrained ones.
 struct NoConstraints {
     void operator()(std::span<const double>, std::span<double>) const noexcept {}
-};
-
-// The two objective channels behind one interface. The solver asks for a
-// batch only for its initial simplex, and only when the objective offers one.
-template <ScalarObjective F>
-struct ScalarEvaluator {
-    F& f;
-    static constexpr bool has_batch = false;
-    double operator()(std::span<const double> x) { return static_cast<double>(f(x)); }
-    void batch(std::span<const std::span<const double>> xs, std::span<double> out) {
-        for (std::size_t i = 0; i < xs.size(); ++i) out[i] = static_cast<double>(f(xs[i]));
-    }
-};
-
-template <BatchObjective F>
-struct BatchEvaluator {
-    F& f;
-    static constexpr bool has_batch = true;
-    double operator()(std::span<const double> x) {
-        double out = 0.0;
-        std::span<const double> one[1] = {x};
-        f(std::span<const std::span<const double>>(one, 1), std::span<double>(&out, 1));
-        return out;
-    }
-    void batch(std::span<const std::span<const double>> xs, std::span<double> out) { f(xs, out); }
 };
 
 template <class Eval, ConstraintFunction C>
@@ -309,16 +286,9 @@ private:
 
     // The displacement of initial vertex i along coordinate i: +rho when the
     // box allows it, else -rho, else whichever side has more room, shrunk to
-    // that room. Without bounds it is always +rho.
+    // that room (box.hpp). Without bounds it is always +rho.
     [[nodiscard]] double initial_offset(std::size_t i) const {
-        if (!bounds_) return rho_;
-        const std::optional<double>& hi = bounds_->upper[i];
-        const std::optional<double>& lo = bounds_->lower[i];
-        const double up = hi.has_value() ? *hi - base_[i] : rho_;
-        const double down = lo.has_value() ? base_[i] - *lo : rho_;
-        if (up >= rho_) return rho_;
-        if (down >= rho_) return -rho_;
-        return up >= down ? up : -down;
+        return axis_offset(bounds_, base_, i, rho_);
     }
 
     // Section 2: the n + 1 initial points, x0 and x0 displaced along each
@@ -745,7 +715,7 @@ private:
         }
         r.evaluations = evals_;
         r.status = status_;
-        r.final_trust_radius = rho_;
+        r.final_radius = rho_;
         return r;
     }
 
