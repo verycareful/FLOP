@@ -7,6 +7,70 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.1.0] - 2026-10-04 01:19 IST
+
+The second algorithm: Nelder-Mead, written from the statement of
+Lagarias, Reeds, Wright and Wright, with Gao and Han's coefficients for
+higher dimensions, behind the same interface and facade as COBYLA. Its
+test suite is the 0.1.1.1 release; the rules still to be read against the
+paper's text are listed on the algorithm page.
+
+### Added
+
+- `flop::nelder_mead::minimize` and `minimize_batch`: the simplex method of
+  Lagarias, Reeds, Wright and Wright (SIAM J. Optim. 9(1), 1998, section
+  2), with reflection, expansion, outside and inside contraction and
+  shrink, the paper's acceptance tests and its two tie-breaking rules.
+  Gao and Han's dimension-dependent coefficients (Comput. Optim. Appl.
+  51(1), 2012) are the default; `Options::adaptive_coefficients = false`
+  selects the standard 1, 2, 1/2, 1/2, which are also used at n = 1.
+- A step that does not shrink costs O(n) beyond its evaluations: vertices
+  stay in fixed slots and only a rank index moves, the centroid comes from
+  a running sum rebuilt every n + 1 replacements, the new vertex is ranked
+  by binary search, and the stopping radius is bracketed from
+  per-coordinate extents, with the O(n^2) radius computed only near a
+  stop. On a sphere at a budget of 20 n the optimizer's own cost is 82 ns
+  per evaluation at 16 parameters and 0.70 us at 128, unbounded, and 104
+  ns and 0.87 us inside a box.
+- Box bounds project every trial point onto the box. A simplex flattened
+  onto a box face is tested off the face before a tolerance stop is
+  reported, and restarts from a better point when there is one, so a run
+  cannot stop on the wrong face and report `XtolReached`.
+- The batch channel carries the initial simplex, `x0` first, and every
+  shrink.
+- `flop::Minimizer::create("NELDER_MEAD")` and
+  `Minimizer::set_adaptive_coefficients`.
+- `bench_nelder_mead`, at the parameter counts of `bench_cobyla`, bounded
+  and unbounded and with both coefficient sets, and its CI smoke run.
+- Documentation: `docs/algorithms/nelder-mead.md`, naming every deviation
+  from the paper and every rule still to be verified against its text, and
+  `docs/api/nelder_mead.md`.
+
+### Changed
+
+- **Breaking:** `Result::final_trust_radius` is renamed `final_radius`. It
+  holds the scale the method reached when it stopped, COBYLA's trust
+  radius or Nelder-Mead's simplex radius, and the x tolerances act on it.
+- A facade setter for an option the selected algorithm does not have
+  throws `std::invalid_argument`, and the constrained overloads throw for
+  `NELDER_MEAD` before any evaluation, so nothing a caller passes is
+  silently ignored.
+- `flop/minimizer.hpp` does not include `flop/cobyla.hpp`. Code that
+  reached COBYLA through the facade header includes `flop/cobyla.hpp`
+  itself, or `flop/flop.hpp`.
+- The scalar and batch evaluators and the box helpers (the initial-simplex
+  offset and the projection onto the box) are shared by both algorithms
+  under `flop/detail`. COBYLA's suite passes with only the rename applied.
+
+### Results
+
+168 tests across 14 suites, all passed in both binaries, strict and
+-ffast-math, on every tree (0.2 to 0.4 s per binary; Linux x86-64; GCC
+16.2.1, GCC 14.3.1, clang 23.1.1, and GCC 16.2.1 with the library under
+-ffast-math). The clang -ffast-math binary skips the one test that hands a
+NaN back through the objective's return value, as in every release since
+0.1.0.1.
+
 ## [0.1.0.4] - 2026-09-19 17:16 IST
 
 One test, the third time. It was red on GCC 13 in the 0.1.0.2 run and red
