@@ -48,9 +48,12 @@ The coefficients:
 | adaptive (Gao and Han), `n >= 2` | 1 | 1 + 2/n | 3/4 - 1/(2n) | 1 - 1/n |
 
 The adaptive values equal the standard ones at `n = 2`. Above roughly ten
-dimensions the standard expansion and contraction distort the simplex
-faster than it moves, and the method stalls. The adaptive values keep it
-moving, which is why they are the default.
+dimensions the standard values spend most iterations on reflections, which
+lower the objective least, and Gao and Han's Theorem 2.1 shows the descent
+an expansion or contraction guarantees shrinking as `(n - 1)/(2 n^2)`. On
+their problem (4.3) the standard method then stops far from the minimiser
+(their Table 1). The adaptive values keep it moving, which is why they are
+the default.
 
 The vertices stay where they are in memory. Only an index of ranks moves,
 and a step that does not shrink costs `O(n)` beyond its evaluations: the
@@ -90,10 +93,15 @@ when the vertex that held its extreme is the one discarded. A shrink costs
   at `n = 1` their shrink coefficient would be zero. FLOP uses the standard
   coefficients at `n = 1` whatever the option says.
 - **Batch evaluation.** With a `BatchObjective`, the initial simplex goes
-  out as one call of `n + 1` points with `x0` first, and every shrink as one
-  call of `n`. Every other evaluation depends on the one before it and goes
+  out as one call of `n + 1` points with `x0` first, and every shrink, and
+  the fresh simplex of a restart after the face test, as one call of `n`.
+  Every other evaluation depends on the one before it and goes
   out alone. A cap too small for the whole batch sends the points one at a
-  time, up to the cap. The trajectory is the same on both channels.
+  time, up to the cap. Both channels evaluate the same points in the same
+  order, with one exception: when a point inside a batch call meets
+  `stop_value`, the call has already evaluated every point in it, so all of
+  them count as evaluations, reach `on_evaluation`, and can be the result,
+  where the scalar channel stops at the point that met it.
 - **No random state.** The method is deterministic given the objective's
   values.
 
@@ -123,23 +131,61 @@ lets the value reach memory.
 
 ## Verification against the paper
 
-The implementation has been checked against a direct transcription of
-section 2 of Lagarias et al. that recomputes the centroid and re-sorts the
-simplex every iteration. The two produce the same sequence of evaluated
-points, to rounding, for thousands of evaluations on smooth problems in two
-to ninety-six dimensions and on staircase functions, where ties and shrinks
-are constant. That pins the incremental bookkeeping to the statement; it
-does not pin the statement to the paper. The following rules are
-implemented from the text as recalled, and are to be read against it:
+The test suite holds the implementation to section 2 of Lagarias et al.
+rule by rule. In exact arithmetic (a power-of-two dimension, a dyadic start
+and step, and every coefficient of both sets dyadic) a test chooses the
+objective's value at every point the method evaluates, so each acceptance
+test runs on both sides of its inequality and at its boundary, and the
+points the method evaluates next are compared with (2.4) to (2.7) and step
+5 to the bit:
 
-- the four acceptance tests, including which inequalities are strict:
-  `f(x_1) <= f(x_r) < f(x_n)` for reflection, `f(x_e) < f(x_r)` for
-  expansion, `f(x_c) <= f(x_r)` outside, `f(x_cc) < f(x_{n+1})` inside;
-- the rank of the new vertex after a step that does not shrink, and the one
-  rule for ties after a shrink;
-- the conditions on the coefficients (`rho > 0`, `chi > 1`, `chi > rho`,
-  `0 < gamma < 1`, `0 < sigma < 1`);
-- Gao and Han's four formulas, and the dimensions they state them for.
+- a reflection is accepted for `f(x_1) <= f(x_r) < f(x_n)`, including
+  `f(x_r) = f(x_1)`, and `f(x_r) = f(x_n)` goes to the outside contraction
+  (page 116);
+- the expansion point is kept only when `f(x_e) < f(x_r)`, compared with
+  `f(x_r)` and not with `f(x_1)` (page 116, and section 3.1, property 4);
+- the outside contraction is accepted for `f(x_c) <= f(x_r)` (2.6) and the
+  inside one for `f(x_cc) < f(x_{n+1})` (2.7), with `f(x_r) = f(x_{n+1})`
+  already an inside contraction;
+- the nonshrink ordering rule reproduces page 118's example, `(1, 2, 2, 3,
+  3)` with `f(v) = 2`;
+- after a shrink, a new vertex tying `x_1` does not displace it, and the
+  other ties keep the order their originals had; the initial simplex keeps
+  construction order on ties.
+
+The nonshrink ordering rule is printed on page 116 as
+`j = max{ l | f(v) < f(x_{l+1}) }`, which taken literally is always `n`,
+since every accepted point is better than `x_{n+1}`. The sentence above it
+and the example on page 118 both define the smallest such `l`: the new
+vertex goes after every kept vertex of equal value. That is the rule
+implemented and tested.
+
+In one dimension `x_n` is `x_1`, so the reflection interval is empty and no
+iteration ends in step 2 (page 125). Gao and Han state their coefficients
+(4.1) for `n >= 2`; at `n = 1` their shrink coefficient is zero, outside the
+condition `0 < sigma < 1` of (2.1), which is why the standard values are used
+there.
+
+On whole runs, a slow transcription of section 2, which recomputes the
+centroid, re-sorts the simplex and computes the radius exactly every
+iteration, replays the implementation's evaluations. It must ask for the
+same points, to the bit in exact arithmetic and to rounding elsewhere, and
+stop at the same iteration. On those runs the suite also checks what the
+papers prove: the structure (2.9) of a nonshrink step and the change index
+(2.8); that the worst value falls within `n + 1` nonshrink iterations (page
+118); Lemma 3.3 (2); the evaluation counts of section 3.1; the volume of
+Lemma 3.1; the diameter (4.1) in one dimension; that a strictly convex
+function never causes a shrink (Lemma 3.5); the proximity bound of Lemma 4.3
+in one dimension; and Gao and Han's sufficient descent (2.2) for the
+standard coefficients.
+
+Gao and Han's coefficients are checked against (4.1) for every `n` up to
+4096, together with the conditions (2.1) and the `rho gamma < 1` of Lemma
+3.6. From their Table 1's start and settings on their problem (4.3), the
+standard coefficients stop far from the minimiser for `sigma = 1e-4` at 20
+and 30 dimensions while the adaptive ones do not, as the table reports, and
+the adaptive share of reflection steps on `x'x` stays at or below the 0.45
+of their Figure 2.
 
 Box bounds, the initial simplex and the stopping rules are FLOP's own and
 are listed under deviations.

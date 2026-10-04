@@ -7,6 +7,133 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.1.1] - 2026-10-04 13:27 IST
+
+The test release for Nelder-Mead. No library behaviour changes. The suite
+holds the method to the papers it is written from, rule by rule and
+property by property, and where it found the library wrong it says so with
+a test that stays red until the fix. It found more than I expected: one of
+the defects is a run that cannot end without an evaluation cap.
+
+### Added
+
+- The Nelder-Mead suite, 115 tests across 12 suites, built twice from one
+  set of sources (strict and `-ffast-math`) and run on four trees:
+  - every acceptance test of Lagarias, Reeds, Wright and Wright (section
+    2.1) on both sides of its inequality and at its boundary, the trial
+    points of both coefficient sets in one to eight dimensions, the
+    tie-breaking rules, and the paper's own example on page 118, all in
+    exact arithmetic and to the bit, with every expected point computed
+    from the paper's formulas;
+  - what the paper proves, checked on the method's own runs: the
+    structure (2.9) of a step and the change index (2.8), the bound on how
+    long the worst value can stand, Lemmas 3.1, 3.3, 3.5 and 4.3, and the
+    one-dimensional properties of section 4; and Gao and Han's sufficient
+    descent (2.2);
+  - a slow transcription of section 2 in the test tree, which recomputes
+    the centroid, re-sorts the simplex and computes the radius exactly
+    every iteration, and which must ask for the points the method
+    evaluated and stop where it stopped, to the bit in exact arithmetic
+    and to rounding over runs of up to 96 dimensions; for every radius a
+    run passes through, an x tolerance at that radius must stop the run
+    exactly there;
+  - Gao and Han's coefficients against their formula (4.1) for every
+    dimension up to 4096, with the conditions (2.1); their Table 1, whose
+    claim holds (the standard coefficients stall on their problem (4.3)
+    from 20 dimensions, the adaptive ones do not), and which the method
+    reproduces evaluation for evaluation in 7 of its 12 rows; and their
+    Figures 1 and 2 (the adaptive share of reflection steps stays below
+    0.45);
+  - every stopping rule, the evaluation cap at every kind of step, the
+    precision floor at three scales, box bounds (the initial simplex in a
+    box, projection, the face test and its restarts), the batch channel's
+    call shape, every `std::invalid_argument` on both entry points and the
+    facade, `NELDER_MEAD` through `Minimizer`, a compile-time check that
+    `flop/minimizer.hpp` does not pull in COBYLA, determinism, extreme
+    objective values, and convergence on the sphere up to 128 dimensions
+    and on the More, Garbow and Hillstrom problems of Gao and Han's Table
+    2 with closed-form minimisers.
+
+### Changed
+
+- `docs/algorithms/nelder-mead.md` states why the standard coefficients
+  stall in Gao and Han's terms (a growing share of reflection steps, and
+  the descent their Theorem 2.1 guarantees shrinking as (n - 1)/(2 n^2))
+  rather than as a distortion of the simplex. "Verification against the
+  paper" now says what each rule is checked against, by page and equation,
+  including the reading of the nonshrink ordering rule: printed as a
+  maximum on page 116, defined as the smallest index by the text above it
+  and by the example on page 118.
+- Both Nelder-Mead pages state that a restart after the face test is one
+  batch call of `n` points, and that when a point inside a batch call
+  meets `stop_value`, every point of the call has been evaluated, counts,
+  and can be the result, where the scalar channel stops at the point that
+  met it.
+
+### Known defects, pinned red
+
+Thirteen tests fail on purpose in the strict binaries and twelve in the
+`-ffast-math` ones, and will pass in 0.1.1.2. They pin six defects, and a
+seventh is listed without a pin:
+
+- The precision floor, `epsilon` times the largest of `initial_step` and the
+  best vertex's coordinates, can sit below the smallest radius the
+  arithmetic reaches. A simplex then stalls two units in the last place
+  wide, every shrink rounds back onto the same points, and a run with only
+  a cap shrinks until the cap; one with only a tolerance below the floor
+  never ends. It happens near 1 as well as near 1e6.
+  `V0111Status.ThePrecisionFloorIsReachableAtEveryScale`, and
+  `V0111Status.WithOnlyACapTheRunEndsAtThePrecisionFloor` in the strict
+  binaries.
+- On a box, a convex problem whose minimum is off a face can stop
+  `XtolReached` one unit in the last place from the bound, at a point that
+  is not the minimiser: a reflection projected onto the bound starts an
+  outside contraction that is projected too, and after the face test's
+  restart the simplex collapses next to the face, where the test no longer
+  applies. A minimum on a corner of the box can be missed the same way.
+  `V0111Bounds.AConvexProblemWithItsMinimumOffTheFaceReachesIt`,
+  `V0111Bounds.AMinimumOnACornerInFiveDimensionsIsReached` (strict and clang
+  `-ffast-math`), `V0111Bounds.AnOptimumOutsideTheBoxLandsOnItsFace` (GCC
+  `-ffast-math`).
+- The face test does not run before a `RoundoffLimited` stop, so a run with
+  only a cap ends flat on a face it could leave.
+  `V0111Bounds.ARunWithOnlyACapStillGetsTheFaceTest`.
+- An initial vertex moved to a bound is computed as `x0 + (bound - x0)`,
+  which can round past the bound, so the method evaluates outside the box.
+  The helper is shared, and COBYLA does the same.
+  `V0111Bounds.AnInitialVertexMovedToABoundLandsOnIt`.
+- Nothing checks a trial point for overflow, so a simplex near the top of
+  the range hands the objective an infinite coordinate, in Nelder-Mead and
+  in COBYLA's initial simplex.
+  `V0111Fp.NoNonFiniteCoordinateIsEverHandedToTheObjective`.
+- `Result::final_radius` after a cap or `stop_value` part way through a
+  shrink or a restart, or through the first simplex inside a box narrower
+  than `initial_step`, describes vertices that were placed and never
+  evaluated. It should be the radius of the last simplex whose every
+  vertex was evaluated, and `initial_step` while the first one is
+  incomplete. `V0111Status.FinalRadiusOnACapInsideAShrinkIsTheLastEvaluatedSimplex`,
+  `V0111Status.FinalRadiusWhileTheFirstSimplexIsIncompleteIsTheInitialStep`,
+  `V0111Bounds.FinalRadiusOnACapInsideARestartIsTheLastEvaluatedSimplex`, and
+  through them `V0111Status.EveryCapGivesAPrefixOfTheUncappedRun`,
+  `V0111Reference.LongRunsAgreeToRoundingAndStopTogether` and
+  `V0111Bookkeeping.TheStopIsDecidedExactlyAtEveryRadiusTheRunPasses`, whose
+  points, stops and results otherwise agree with the transcription.
+- Not pinned, because it cannot be seen from outside: with objective values
+  at `-DBL_MAX` and `+DBL_MAX` in one simplex, the spread the f tolerances
+  test overflows to infinity, which `-ffinite-math-only` makes undefined.
+  The answer it gives is the right one, since the true spread exceeds every
+  tolerance too.
+
+### Results
+
+283 tests across 26 suites (2.7 to 3.2 s per binary; Linux x86-64; GCC
+16.2.1, GCC 14.3.1, clang 23.1.1, and GCC 16.2.1 with the library under
+-ffast-math). Every test of the earlier releases passed in both binaries on
+every tree. The strict binaries passed 270, the GCC -ffast-math binaries
+271, and the clang -ffast-math binary 269, skipping the two tests that hand
+a NaN back through the objective's return value, as in every release since
+0.1.0.1. The failures are the pinned defects above.
+
 ## [0.1.1.0] - 2026-10-04 01:19 IST
 
 The second algorithm: Nelder-Mead, written from the statement of

@@ -34,8 +34,10 @@ Result minimize_batch(F&& f, std::span<const double> x0, const Options& opts);
 
 `f` is called with a point and returns its objective value. The batch form
 uses `f(xs, out)` for the initial simplex, `n + 1` independent points with
-`x0` first, and for every shrink, `n` points; every other evaluation is one
-point at a time. The method takes no nonlinear constraints, and there is no
+`x0` first, and for every shrink and every restart from the face test, `n`
+points; every other evaluation is one point at a time. When a point inside
+such a call meets `stop_value`, every point of the call has been evaluated
+and counts. The method takes no nonlinear constraints, and there is no
 overload for them.
 
 Every entry point returns the best point evaluated with the reason the run

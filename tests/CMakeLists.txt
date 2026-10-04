@@ -24,8 +24,11 @@ FetchContent_MakeAvailable(googletest)
 
 # Test sources, one file per area, named test_v<version>_<area>.cpp after
 # the release that ships them; v0101_problems.hpp holds the problems and
-# optima the 0.1.0.1 files share. All of them compile under both models.
+# optima the 0.1.0.1 files share, v0111_problems.hpp and the reference
+# transcription v0111_reference_nm.hpp what the Nelder-Mead files share.
+# All of them compile under both models.
 #
+# COBYLA:
 #   validation     every std::invalid_argument, and the mid-run runtime_error
 #   unconstrained  standard problems with closed-form optima
 #   constrained    Powell's 1994 test set, HS24, HS35
@@ -39,6 +42,20 @@ FetchContent_MakeAvailable(googletest)
 #   violation      the reported violation never carries a negative zero
 #   paper          Powell's Tables 1 and 2: problems (A) to (J) at his settings
 #   growth         the trust radius that grows, against the paper's that does not
+#
+# Nelder-Mead:
+#   paper          Lagarias et al.'s rules in exact arithmetic; what the papers prove
+#   coefficients   Gao and Han's set against (4.1); their Table 1 and Figs. 1-2
+#   reference      the method against the reference transcription
+#   bookkeeping    the running sum, the extents, the stop from the diameter bracket
+#   status         each stopping rule, the cap, the precision floor, the result
+#   bounds         projection, the initial simplex in a box, the face test
+#   batch          the batch channel's call shape against the scalar trajectory
+#   validation     every std::invalid_argument, and the run-time errors
+#   facade         NELDER_MEAD through Minimizer; header compiles alone, so it
+#                  includes nothing of FLOP but flop/minimizer.hpp
+#   fp             determinism, extreme values, no non-finite point
+#   corpus         sphere to 128-d, More-Garbow-Hillstrom, the documented examples
 set(FLOP_TEST_SOURCES
     test_v0101_validation.cpp
     test_v0101_unconstrained.cpp
@@ -53,6 +70,18 @@ set(FLOP_TEST_SOURCES
     test_v0102_violation.cpp
     test_v0102_paper.cpp
     test_v0102_growth.cpp
+    test_v0111_paper.cpp
+    test_v0111_coefficients.cpp
+    test_v0111_reference.cpp
+    test_v0111_bookkeeping.cpp
+    test_v0111_status.cpp
+    test_v0111_bounds.cpp
+    test_v0111_batch.cpp
+    test_v0111_validation.cpp
+    test_v0111_facade.cpp
+    test_v0111_header.cpp
+    test_v0111_fp.cpp
+    test_v0111_corpus.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines
