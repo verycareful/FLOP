@@ -18,7 +18,8 @@
 // Every entry point validates its input and throws std::invalid_argument on a
 // malformed problem; after that nothing throws for input. An objective or
 // constraint that returns a non-finite value ends the run with
-// std::runtime_error, where the compiler lets the value reach memory.
+// std::runtime_error, where the compiler lets the value reach memory, and so
+// does a trial point with a coordinate beyond the largest double.
 //
 // Example:
 //

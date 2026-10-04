@@ -7,11 +7,12 @@
 
 // 0.1.1.1: Nelder-Mead's batch channel.
 //
-// The method has independent points in three places: the initial simplex
-// (n + 1 points, x0 first), a shrink (n points, step 5 of Lagarias et al.),
-// and a restart after the face test (n points). The batch objective gets
-// each of those as one call, when the cap allows the whole call, and every
-// other evaluation alone. The contract is on the shape of the calls, held
+// The method has independent points in four places: the initial simplex
+// (n + 1 points, x0 first), a shrink (the vertices it moved, at most n,
+// step 5 of Lagarias et al.), a rung of the poll ladder (up to 2n points)
+// and a restart's simplex (n points). The batch objective gets each of
+// those as one call, when the cap allows the whole call, and every other
+// evaluation alone. The contract is on the shape of the calls, held
 // here against the reference transcription's record of which iteration
 // shrank, and on the points: the batch run evaluates what the scalar run
 // evaluates, in the same order, to the bit.
@@ -59,19 +60,17 @@ double coupled(std::span<const double> x) {
 }
 
 // The call sizes the documented contract implies for a run the reference
-// replayed: the initial simplex in one call, each shrink's n points in one,
-// everything else alone, including whatever the run evaluated after its
-// last completed iteration.
+// replayed without a box: the initial simplex in one call, each shrink's
+// moved vertices in one (after its reflection and contraction), everything
+// else alone, including whatever the run evaluated after its last completed
+// iteration. A single point is a call of one either way.
 std::vector<std::size_t> expected_calls(std::size_t n, const v0111::ReferenceRun& ref,
                                         std::size_t total) {
     std::vector<std::size_t> sizes{n + 1};
     std::size_t done = n + 1;
     for (const v0111::Step& s : ref.steps) {
         if (s.termination == v0111::Termination::Shrink) {
-            sizes.insert(sizes.end(), {1, 1, n});
-        } else if (s.termination == v0111::Termination::Restart) {
-            sizes.push_back(1);
-            sizes.push_back(n);
+            sizes.insert(sizes.end(), {1, 1, s.evaluations - 2});
         } else {
             sizes.insert(sizes.end(), s.evaluations, 1);
         }
@@ -138,21 +137,21 @@ TEST(V0111Batch, EveryShrinkIsOneCallOfNAndEveryOtherPointGoesAlone) {
     }
 }
 
-TEST(V0111Batch, ARestartIsOneCallOfN) {
+TEST(V0111Batch, EachRungIsOneCallAndARestartOneCallOfN) {
     // The corner scenario of the bounds suite: five single steps onto the
-    // corner, two single probes, then the restart's two new vertices in one
-    // call.
-    const double eps = std::numeric_limits<double>::epsilon();
+    // corner, the ladder's two rungs of two points each, the second holding
+    // the better (0, 0.5), then the restart's two new vertices in one call.
     Table t;
     t.set({0.0, 0.0}, 1.0).set({1.0, 0.0}, 3.0).set({0.0, 1.0}, 2.0).set({0.0, 0.75}, 1.5);
-    t.set({eps, 0.0}, 5.0).set({0.0, eps}, 0.5);
+    t.set({0.5, 0.0}, 0.7).set({0.0, 0.5}, 0.5).set({0.5, 0.5}, 4.0);
     auto f = v0111::batched([&t](std::span<const double> x) { return t(x); });
-    flop::nelder_mead::Options o = v0111::options(1.0, 12);
+    flop::nelder_mead::Options o = v0111::options(1.0, 14);
     o.bounds = flop::Bounds::box(Vec{0.0, 0.0}, Vec{1.0, 1.0});
     o.stopping.xtol_abs = 0.5;
     const Traced run = v0111::traced_batch(f, Vec{0.0, 0.0}, o);
-    EXPECT_EQ(f.sizes, (std::vector<std::size_t>{3, 1, 1, 1, 1, 1, 1, 1, 2}));
-    EXPECT_EQ(run.r.evaluations, 12u);
+    EXPECT_EQ(f.sizes, (std::vector<std::size_t>{3, 1, 1, 1, 1, 1, 2, 2, 2}));
+    EXPECT_EQ(run.r.evaluations, 14u);
+    EXPECT_EQ(t.misses(), 0u);
 }
 
 TEST(V0111Batch, ACapTooSmallForACallSendsThePointsOneAtATime) {

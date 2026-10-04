@@ -34,24 +34,30 @@ Result minimize_batch(F&& f, std::span<const double> x0, const Options& opts);
 
 `f` is called with a point and returns its objective value. The batch form
 uses `f(xs, out)` for the initial simplex, `n + 1` independent points with
-`x0` first, and for every shrink and every restart from the face test, `n`
-points; every other evaluation is one point at a time. When a point inside
+`x0` first; for every shrink, the vertices it moved; for every rung of the
+poll ladder on a box, up to `2n` points; and for every restart's simplex,
+`n` points. Every other evaluation is one point at a time. When a point inside
 such a call meets `stop_value`, every point of the call has been evaluated
 and counts. The method takes no nonlinear constraints, and there is no
 overload for them.
 
 Every entry point returns the best point evaluated with the reason the run
-ended (`docs/api/result.md`). `Result::final_radius` is the simplex radius
-at exit and `max_constraint_violation` is zero.
+ended (`docs/api/result.md`). `Result::final_radius` is the radius of the
+last simplex whose every vertex was evaluated, or `initial_step` while the
+first one is incomplete, and `max_constraint_violation` is zero.
 
 ## Exceptions
 
 - `std::invalid_argument` at entry: empty or non-finite `x0`, no stopping
   criterion, a negative or non-finite tolerance, a non-positive
   `initial_step`, bounds of the wrong length, a lower bound above its upper
-  bound, or `x0` outside the bounds.
+  bound, `x0` outside the bounds, an `initial_step` for which
+  `x0 +- initial_step` overflows, or `x0` or an initial vertex with a
+  coordinate beyond `DBL_MAX / (n + 5)`, the range the method evaluates in
+  (`docs/algorithms/nelder-mead.md`).
 - `std::runtime_error` during the run: the objective returned a non-finite
-  value.
+  value, or the method would evaluate a point beyond that range (in
+  practice, an objective unbounded below).
 - Anything the objective throws propagates unchanged.
 
 ## Example

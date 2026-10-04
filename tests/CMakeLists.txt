@@ -49,13 +49,19 @@ FetchContent_MakeAvailable(googletest)
 #   reference      the method against the reference transcription
 #   bookkeeping    the running sum, the extents, the stop from the diameter bracket
 #   status         each stopping rule, the cap, the precision floor, the result
-#   bounds         projection, the initial simplex in a box, the face test
+#   bounds         projection, the initial simplex in a box, the poll ladder
 #   batch          the batch channel's call shape against the scalar trajectory
 #   validation     every std::invalid_argument, and the run-time errors
 #   facade         NELDER_MEAD through Minimizer; header compiles alone, so it
 #                  includes nothing of FLOP but flop/minimizer.hpp
 #   fp             determinism, extreme values, no non-finite point
 #   corpus         sphere to 128-d, More-Garbow-Hillstrom, the documented examples
+#   shrink         a shrink that moves some vertices or none; the radius after one
+#   ladder         when the ladder runs, its bottom rung, both channels through it
+#
+# Both:
+#   range          the coordinate range: refusals at entry, the error at run time
+#   tolerance      the f tolerance tests at the ends of the finite range
 set(FLOP_TEST_SOURCES
     test_v0101_validation.cpp
     test_v0101_unconstrained.cpp
@@ -82,6 +88,10 @@ set(FLOP_TEST_SOURCES
     test_v0111_header.cpp
     test_v0111_fp.cpp
     test_v0111_corpus.cpp
+    test_v0112_shrink.cpp
+    test_v0112_ladder.cpp
+    test_v0112_range.cpp
+    test_v0112_tolerance.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines

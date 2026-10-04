@@ -69,17 +69,42 @@ when the vertex that held its extreme is the one discarded. A shrink costs
 - **Box bounds.** None of the three papers defines the method on a box.
   FLOP projects every trial point onto the box, coordinate by coordinate,
   so every evaluation is inside it and a minimum on a bound can be reached
-  exactly. A simplex whose every vertex sits on the same bound in some
-  coordinate has lost that dimension: no reflection, expansion,
-  contraction or shrink can leave the face. Before a tolerance stop is
-  reported on a box, FLOP therefore tests every such face with one point,
-  the best vertex moved off the bound by the simplex radius. A better point
-  means the minimum is not on the face, and the method starts again from
-  that point with a fresh initial simplex; otherwise the stop stands. The
-  restart cannot cycle, since each one starts from a strictly lower value.
+  exactly. Projection also distorts the method: a reflection and the
+  contraction after it can land on the same point of a face, and the
+  simplex can flatten against a face, or collapse onto a corner, away from
+  the minimiser, where it meets a stopping test without being near one.
+  So once the box has acted on a run (a trial point was projected, or an
+  initial vertex was moved by a bound), every stop verdict is preceded by
+  a poll ladder. Each rung polls the `2n` points `x_1 + d e_i` and
+  `x_1 - d e_i`, each clipped to the box, in coordinate order and plus
+  before minus, leaving out a point clipped back onto `x_1`. The rungs run
+  `d = initial_step, initial_step / 2, ...` down to the scale of the stop:
+  the larger x tolerance for `XtolReached`, otherwise the simplex radius or
+  the precision floor, whichever is larger. A rung is evaluated whole. If
+  its first point of least value is strictly below `f(x_1)`, the method
+  starts again from that point with a fresh simplex of edge `d`. Otherwise
+  the next rung runs, and when the last one fails the stop stands. The
+  restarts cannot cycle, since each one starts from a strictly lower
+  value. The polls are those of coordinate search on a box in R. M. Lewis
+  and V. Torczon, "Pattern search algorithms for bound constrained
+  minimization", SIAM Journal on Optimization 9(4), 1999, pp. 1082-1099,
+  with the step halved after every failed poll; here they certify a stop
+  rather than drive the search. A box that never binds leaves the run
+  exactly the unbounded one.
 - **The initial simplex.** Lagarias et al. leave the initial simplex to the
-  user. FLOP uses `x0` and `x0 + initial_step * e_i` for each coordinate
-  `i`, displaced to the other side, or by less, where a bound requires it.
+  user. FLOP uses `x0` and, for each coordinate `i`, the point
+  `x0 + initial_step * e_i` when it is inside the box, else
+  `x0 - initial_step * e_i` when that one is, else `x0` with coordinate `i`
+  set to the bound on the side with more room. The vertex is the bound
+  itself, never `x0` plus the room, which can round past it.
+- **The shrink in rounded arithmetic.** Step 5 evaluates `n` new points.
+  Rounded, a vertex a few units in the last place from `x_1` can land back
+  on itself: one `d` units away stays put whenever `sigma d` rounds to `d`,
+  which for Gao and Han's `sigma = 1 - 1/n` is every `d` below about
+  `n / 2`. FLOP evaluates only the vertices that moved; an unmoved one keeps
+  its value. A shrink that moves no vertex would leave the simplex as it
+  was, and the method would repeat it forever, so it is a stop verdict,
+  `RoundoffLimited`, decided before anything is evaluated.
 - **Stopping rules.** None of the papers fixes one. FLOP stops on the
   simplex radius `r`, the largest coordinate distance from a vertex to the
   best one (`XtolReached` when `r <= xtol_abs` or
@@ -88,20 +113,34 @@ when the vertex that held its extreme is the one discarded. A shrink costs
   `stop_value` after every evaluation, and on the cap. The radius has a
   floor at the precision of the coordinates, `epsilon` times the larger of
   `initial_step` and the largest coordinate of the best vertex; reaching
-  it is `RoundoffLimited`. The tests run at the top of each iteration.
+  it is `RoundoffLimited`, as is a shrink that moves no vertex. The tests
+  run at the top of each iteration. The spread is compared without being
+  formed where it would exceed the largest double (values of opposite sign
+  near the ends of the range), and a relative tolerance above 1 by a
+  division rather than a product that could overflow.
 - **One dimension.** Gao and Han's coefficients are stated for `n >= 2`;
   at `n = 1` their shrink coefficient would be zero. FLOP uses the standard
   coefficients at `n = 1` whatever the option says.
 - **Batch evaluation.** With a `BatchObjective`, the initial simplex goes
-  out as one call of `n + 1` points with `x0` first, and every shrink, and
-  the fresh simplex of a restart after the face test, as one call of `n`.
-  Every other evaluation depends on the one before it and goes
-  out alone. A cap too small for the whole batch sends the points one at a
+  out as one call of `n + 1` points with `x0` first, every shrink as one
+  call of the vertices it moved, every rung of the ladder as one call of up
+  to `2n`, and the fresh simplex of a restart as one call of `n`. Every
+  other evaluation depends on the one before it and goes out alone. A cap too small for the whole batch sends the points one at a
   time, up to the cap. Both channels evaluate the same points in the same
   order, with one exception: when a point inside a batch call meets
   `stop_value`, the call has already evaluated every point in it, so all of
   them count as evaluations, reach `on_evaluation`, and can be the result,
   where the scalar channel stops at the point that met it.
+- **The coordinate range.** No point is evaluated with a coordinate larger
+  in magnitude than `DBL_MAX / (n + 5)`. Inside that range the running sum
+  of the vertices, the centroid, every trial point and every shrunk vertex
+  are finite, so nothing the method computes overflows. `x0` and the
+  initial vertices are input, and one beyond the range is
+  `std::invalid_argument` at entry, as is an `initial_step` for which
+  `x0 +- initial_step` overflows. A later point beyond it ends the run with
+  `std::runtime_error`; in practice that is an objective unbounded below
+  along a coordinate without a bound, where the simplex expands without
+  end.
 - **No random state.** The method is deterministic given the objective's
   values.
 
@@ -123,11 +162,12 @@ deriving it from `x0`.
 | `FtolReached` | the spread of `f` over the simplex reached the f tolerance |
 | `StopValueReached` | an evaluation returned `f <= stop_value` |
 | `MaxEvaluationsReached` | the cap |
-| `RoundoffLimited` | the simplex radius reached the precision floor |
+| `RoundoffLimited` | the simplex radius reached the precision floor, or a shrink moved no vertex |
 
 Whatever the status, the result is the best point evaluated. A non-finite
 objective value ends the run with `std::runtime_error`, where the compiler
-lets the value reach memory.
+lets the value reach memory, and so does a point beyond the coordinate
+range.
 
 ## Verification against the paper
 
@@ -187,8 +227,24 @@ and 30 dimensions while the adaptive ones do not, as the table reports, and
 the adaptive share of reflection steps on `x'x` stays at or below the 0.45
 of their Figure 2.
 
-Box bounds, the initial simplex and the stopping rules are FLOP's own and
-are listed under deviations.
+Box bounds, the initial simplex, the stopping rules, the shrink in rounded
+arithmetic and the coordinate range are FLOP's own and are listed under
+deviations.
+
+The ladder follows Lewis and Torczon's coordinate search on a box: the
+directions `+-e_i` (their section 6.1, with the identity as basis and core
+pattern, the diagonal core pattern their section 3.5 requires near a
+bound), the step multiplied by `theta = 1/2` after a failed poll (Fig. 3.3),
+and the best point of the whole poll taken, their strong hypothesis (Fig.
+4.1). It differs in two ways. Their poll leaves out a pattern point outside
+the box (Fig. 3.1); the ladder clips it onto the bound instead, which only
+adds candidates, since every pattern point inside the box is still polled.
+And the polls certify a stop rather than drive the search: an improvement
+restarts Nelder-Mead, and each ladder starts again from `initial_step`.
+Their convergence results (Theorems 4.2 and 4.3) are about the limit of
+the step going to zero; a ladder stops at a finite scale, so it certifies
+a stop at that scale and no more. The ladder is tested against this rule
+and against a slow transcription of it.
 
 ## Limits
 
@@ -198,9 +254,16 @@ are listed under deviations.
   simplex method to a nonstationary point", SIAM Journal on Optimization
   9(1), 1998, pp. 148-158, constructs a strictly convex function in two
   dimensions on which the method converges to a point that is not a
-  minimiser. FLOP does not restart on convergence except on a box face, as
-  described above.
-- The face test checks only faces of the box. A simplex that degenerates in
+  minimiser. FLOP does not restart on convergence except through the ladder
+  on a box the run has touched, as described above.
+- The ladder runs only before a stop. A simplex flattened against a face
+  whose values differ only by rounding can keep reflecting without ever
+  meeting a stopping test; such a run ends at the cap with
+  `MaxEvaluationsReached`, never with a converged status.
+- The ladder costs evaluations: up to `2n` per rung, and about
+  `log2(initial_step / scale)` rungs before a stop stands, where `scale` is
+  the stop's scale above.
+- The ladder certifies stops on a box only. A simplex that degenerates in
   the interior, which exact arithmetic rules out and rounding does not,
   is not detected.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

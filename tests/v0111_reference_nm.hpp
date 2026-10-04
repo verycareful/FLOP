@@ -14,7 +14,8 @@
 // paper states them rather than through any index structure. What it shares
 // with FLOP is only what the paper leaves open and FLOP documents
 // (docs/algorithms/nelder-mead.md, "Deviations from the paper"): the initial
-// simplex, the projection onto a box, the stopping rules and the face test.
+// simplex, the projection onto a box, the stopping rules, the shrink that
+// moves no vertex, and the poll ladder.
 //
 // Where the 0.1.1.1 suite settled what FLOP must do, the reference does
 // that, and a test that compares FLOP with it on such a path is red until
@@ -63,7 +64,7 @@
 namespace v0111 {
 
 // The step of Algorithm NM in which an iteration terminated (section 2.1),
-// or a restart after the face test.
+// or a restart from the poll ladder.
 enum class Termination : std::uint8_t {
     Reflect = 2,
     Expand = 3,
@@ -94,6 +95,7 @@ struct ReferenceRun {
     std::vector<Step> steps;         // filled when recording
     std::vector<double> top_radius;  // the exact radius at every stopping test
     std::size_t shrinks = 0;
+    std::size_t still_shrinks = 0;  // shrinks that moved no vertex, each a stop verdict
     std::size_t restarts = 0;
 };
 
@@ -114,8 +116,9 @@ public:
         ended_ = false;
         have_best_ = false;
         complete_radius_.reset();
+        box_acted_ = false;
         status_ = flop::Status::RoundoffLimited;
-        if (build(oracle, x0_, std::nullopt)) {
+        if (build(oracle, x0_, std::nullopt, opts_.initial_step)) {
             while (!ended_) {
                 if (stop_test(oracle)) continue;
                 if (ended_) break;
@@ -180,35 +183,34 @@ private:
     }
 
     // ========================================================== the simplex
-    // The documented displacement of the initial vertex along coordinate i:
-    // +h when the box allows it, else -h, else to the bound on the side with
-    // more room.
-    [[nodiscard]] double offset_vertex(const std::vector<double>& base, std::size_t i) const {
-        const double h = opts_.initial_step;
-        if (!opts_.bounds) return base[i] + h;
+    // The documented initial vertex along coordinate i for step h: base + h
+    // when that point is in the box, else base - h when that one is, else
+    // the bound on the side with more room.
+    [[nodiscard]] double offset_vertex(const std::vector<double>& base, std::size_t i,
+                                       double h) const {
+        const double up = base[i] + h;
+        if (!opts_.bounds) return up;
         const std::optional<double>& lo = opts_.bounds->lower[i];
         const std::optional<double>& hi = opts_.bounds->upper[i];
-        const double up = hi.has_value() ? *hi - base[i] : h;
-        const double down = lo.has_value() ? base[i] - *lo : h;
-        if (up >= h) return base[i] + h;
-        if (down >= h) return base[i] - h;
-        // Both rooms are below h, which a missing bound never is.
-        if (up >= down && hi.has_value()) return *hi;
-        if (lo.has_value()) return *lo;
-        return base[i] + h;
+        if (!hi.has_value() || up <= *hi) return up;
+        const double down = base[i] - h;
+        if (!lo.has_value() || down >= *lo) return down;
+        return *hi - base[i] >= base[i] - *lo ? *hi : *lo;
     }
 
-    // The initial simplex, or a restart's: base and the n displaced points,
-    // evaluated base first (unless known) and then in coordinate order, and
-    // ordered stably, so ties keep construction order.
+    // The initial simplex, or a restart's: base and the n displaced points
+    // at step h, evaluated base first (unless known) and then in coordinate
+    // order, and ordered stably, so ties keep construction order.
     template <class Oracle>
-    bool build(Oracle& oracle, const std::vector<double>& base, std::optional<double> base_f) {
+    bool build(Oracle& oracle, const std::vector<double>& base, std::optional<double> base_f,
+               double h) {
         Ordered fresh;
         fresh.push_back({.x = base, .f = base_f.value_or(0.0)});
         if (!base_f && !evaluate(oracle, fresh[0].x, fresh[0].f)) return false;
         for (std::size_t i = 0; i < n_; ++i) {
             Vertex v{.x = base, .f = 0.0};
-            v.x[i] = offset_vertex(base, i);
+            v.x[i] = offset_vertex(base, i, h);
+            if (v.x[i] != base[i] + h) box_acted_ = true;
             if (!evaluate(oracle, v.x, v.f)) return false;
             fresh.push_back(std::move(v));
         }
@@ -234,7 +236,7 @@ private:
     // ============================================================= stopping
     // The documented stopping rules at the top of an iteration, on the exact
     // radius. True when the run did something other than iterate: it
-    // stopped, or the face test restarted it.
+    // stopped, or the ladder restarted it.
     template <class Oracle>
     bool stop_test(Oracle& oracle) {
         const double r = radius();
@@ -253,59 +255,95 @@ private:
         else if (r <= precision_floor())
             verdict = flop::Status::RoundoffLimited;
         if (!verdict) return false;
-        if (opts_.bounds && face_test(oracle, *opts_.bounds, r)) return true;
-        end(*verdict);
+        conclude(oracle, *verdict, r);
         return true;
     }
 
-    // For each coordinate in which every vertex sits on the same bound, the
-    // best vertex moved off it by max(radius, floor), or to the other bound
-    // where that is closer. True when the run restarted or ended here.
+    // A stop verdict, from the tests above or from a shrink that moved no
+    // vertex: once the box has acted on the run (a projected trial point, an
+    // initial vertex other than base + h), the ladder first, then the stop.
     template <class Oracle>
-    bool face_test(Oracle& oracle, const flop::Bounds& bounds, double r) {
+    void conclude(Oracle& oracle, flop::Status verdict, double r) {
+        if (box_acted_ && opts_.bounds && ladder(oracle, *opts_.bounds, bottom(verdict, r))) return;
+        end(verdict);
+    }
+
+    // The smallest rung: the caller's x tolerance for XtolReached (the larger
+    // of the two when both are set), else max(radius, floor).
+    [[nodiscard]] double bottom(flop::Status verdict, double r) const {
+        if (verdict == flop::Status::XtolReached) {
+            const flop::Stopping& s = opts_.stopping;
+            double t = 0.0;
+            if (s.xtol_abs > 0.0) t = s.xtol_abs;
+            if (s.xtol_rel > 0.0) t = std::max(t, s.xtol_rel * opts_.initial_step);
+            return t;
+        }
+        return std::max(r, precision_floor());
+    }
+
+    // The poll ladder: for d = initial_step, d / 2, ... while d >= bottom,
+    // the points x_1 +- d e_i clipped to the box, coordinate by coordinate
+    // and + before -, a point clipped back onto x_1 left out; the whole rung
+    // is evaluated, and the first point of least value restarts the method
+    // with a fresh simplex of size d when it is strictly below f(x_1). True
+    // when the run restarted or ended here.
+    template <class Oracle>
+    bool ladder(Oracle& oracle, const flop::Bounds& bounds, double bottom) {
         const Vertex best = simplex_.front();
-        const double h = std::max(r, precision_floor());
-        for (std::size_t i = 0; i < n_; ++i) {
-            const double xi = best.x[i];
-            const std::optional<double>& lo = bounds.lower[i];
-            const std::optional<double>& hi = bounds.upper[i];
-            const bool at_lo = lo.has_value() && xi == *lo;
-            const bool at_hi = hi.has_value() && xi == *hi;
-            if (!at_lo && !at_hi) continue;
-            const bool flat =
-                std::ranges::all_of(simplex_, [&](const Vertex& v) { return v.x[i] == xi; });
-            if (!flat) continue;
-            Vertex probe = best;
-            if (at_lo)
-                probe.x[i] = hi.has_value() ? std::min(xi + h, *hi) : xi + h;
-            else
-                probe.x[i] = lo.has_value() ? std::max(xi - h, *lo) : xi - h;
-            const std::size_t first = evals_;
-            if (!evaluate(oracle, probe.x, probe.f)) return true;
-            if (probe.f < best.f) {
-                const Ordered before = simplex_;
-                if (!build(oracle, probe.x, probe.f)) return true;
-                ++run_.restarts;
-                note(Termination::Restart, 0.0, before, first);
-                return true;
+        double d = opts_.initial_step;
+        while (d >= bottom) {
+            std::vector<Vertex> rung;
+            for (std::size_t i = 0; i < n_; ++i) {
+                for (const double sign : {1.0, -1.0}) {
+                    Vertex p = best;
+                    p.x[i] = best.x[i] + sign * d;
+                    const std::optional<double>& bound =
+                        sign > 0.0 ? bounds.upper[i] : bounds.lower[i];
+                    if (bound.has_value() && (sign > 0.0 ? p.x[i] > *bound : p.x[i] < *bound))
+                        p.x[i] = *bound;
+                    if (p.x[i] == best.x[i]) continue;
+                    rung.push_back(std::move(p));
+                }
             }
+            if (!rung.empty()) {
+                const std::size_t first = evals_;
+                for (Vertex& p : rung)
+                    if (!evaluate(oracle, p.x, p.f)) return true;
+                std::optional<std::size_t> arg;
+                for (std::size_t j = 0; j < rung.size(); ++j)
+                    if (rung[j].f < best.f && (!arg || rung[j].f < rung[*arg].f)) arg = j;
+                if (arg) {
+                    const Ordered before = simplex_;
+                    if (!build(oracle, rung[*arg].x, rung[*arg].f, d)) return true;
+                    ++run_.restarts;
+                    note(Termination::Restart, 0.0, before, first);
+                    return true;
+                }
+            }
+            d *= 0.5;
         }
         return false;
     }
 
     // ============================================================ iteration
-    void project(std::vector<double>& x) const {
+    void project(std::vector<double>& x) {
         if (!opts_.bounds) return;
         for (std::size_t i = 0; i < n_; ++i) {
             const std::optional<double>& lo = opts_.bounds->lower[i];
             const std::optional<double>& hi = opts_.bounds->upper[i];
-            if (lo.has_value() && x[i] < *lo) x[i] = *lo;
-            if (hi.has_value() && x[i] > *hi) x[i] = *hi;
+            if (lo.has_value() && x[i] < *lo) {
+                x[i] = *lo;
+                box_acted_ = true;
+            }
+            if (hi.has_value() && x[i] > *hi) {
+                x[i] = *hi;
+                box_acted_ = true;
+            }
         }
     }
 
     // (2.12), summed from scratch: xbar = sum_{i <= n} x_i / n.
-    [[nodiscard]] std::vector<double> z(double tau) const {
+    [[nodiscard]] std::vector<double> z(double tau) {
         std::vector<double> out(n_);
         for (std::size_t i = 0; i < n_; ++i) {
             double s = 0.0;
@@ -387,18 +425,33 @@ private:
     // (x_i - x_1) for i = 2 .. n + 1, evaluated in rank order; x_1 stays
     // first when a new point ties with it, and beyond that the new points
     // keep the order their originals had (FLOP's documented choice of
-    // "whatever rule is used to define the original ordering").
+    // "whatever rule is used to define the original ordering"). FLOP's
+    // documented deviations: a vertex the rounded shrink leaves where it was
+    // keeps its value and is not evaluated again, and a shrink that moves no
+    // vertex is the precision of the arithmetic reached, a RoundoffLimited
+    // verdict.
     template <class Oracle>
     void shrink(Oracle& oracle, const Ordered& before, std::size_t first) {
         Ordered fresh;
+        std::vector<bool> moved;
         for (std::size_t k = 1; k <= n_; ++k) {
-            Vertex v{.x = std::vector<double>(n_), .f = 0.0};
-            for (std::size_t i = 0; i < n_; ++i)
-                v.x[i] = before[0].x[i] + coef_.sigma * (before[k].x[i] - before[0].x[i]);
+            Vertex v{.x = std::vector<double>(n_), .f = before[k].f};
+            bool changed = false;
+            for (std::size_t i = 0; i < n_; ++i) {
+                const double x = before[0].x[i] + coef_.sigma * (before[k].x[i] - before[0].x[i]);
+                v.x[i] = x == before[k].x[i] ? before[k].x[i] : x;
+                changed = changed || x != before[k].x[i];
+            }
+            moved.push_back(changed);
             fresh.push_back(std::move(v));
         }
-        for (Vertex& v : fresh)
-            if (!evaluate(oracle, v.x, v.f)) return;
+        if (std::ranges::none_of(moved, [](bool b) { return b; })) {
+            ++run_.still_shrinks;
+            conclude(oracle, flop::Status::RoundoffLimited, radius());
+            return;
+        }
+        for (std::size_t k = 0; k < n_; ++k)
+            if (moved[k] && !evaluate(oracle, fresh[k].x, fresh[k].f)) return;
         std::ranges::stable_sort(fresh, [](const Vertex& a, const Vertex& b) { return a.f < b.f; });
         const auto ahead =
             std::ranges::count_if(fresh, [&](const Vertex& v) { return v.f < before[0].f; });
@@ -425,6 +478,7 @@ private:
     bool record_;
 
     Ordered simplex_;
+    bool box_acted_ = false;
     std::optional<double> complete_radius_;
     ReferenceRun run_;
     std::size_t evals_ = 0;
@@ -515,9 +569,9 @@ private:
 // The verdict of an audit: FLOP's whole trace was what the reference asked
 // for, nothing more and nothing less (points_agree, same_length); the two
 // runs ended the same way at the same best point (same_outcome); and they
-// report the same final radius (same_radius), which is kept apart because
-// it is the one field where FLOP and the reference differ by a known defect
-// when a run ends part way through a shrink or a restart.
+// report the same final radius (same_radius), a field of its own because a
+// run that ends part way through a shrink or a restart reports the radius
+// of the simplex before it, which the tests on those paths name directly.
 struct AuditReport {
     bool points_agree;
     bool same_length;

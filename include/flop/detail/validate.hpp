@@ -14,12 +14,15 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 
+#include "flop/detail/box.hpp"
 #include "flop/detail/fp.hpp"
 #include "flop/options.hpp"
 
@@ -68,12 +71,51 @@ inline void validate_bounds(const char* where, const Bounds& b, std::span<const 
     }
 }
 
+// The initial simplex computes x0[i] + initial_step and x0[i] - initial_step,
+// box or no box (box.hpp), so both must stay finite: initial_step <= max -
+// |x0[i]|, which is computed without overflow since |x0[i]| <= max.
+inline void validate_step_range(const char* where, double h, std::span<const double> x0) {
+    constexpr double kMax = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < x0.size(); ++i)
+        if (h > kMax - std::fabs(x0[i]))
+            fail(where,
+                 "x0 plus or minus initial_step overflows the largest double at coordinate " +
+                     std::to_string(i));
+}
+
 inline void validate_options(const char* where, const Options& o, std::span<const double> x0) {
     validate_x0(where, x0);
     validate_stopping(where, o.stopping);
     if (fp_bad(o.initial_step) || !(o.initial_step > 0.0))
         fail(where, "initial_step must be positive and finite");
+    validate_step_range(where, o.initial_step, x0);
     if (o.bounds) validate_bounds(where, *o.bounds, x0);
+}
+
+// Nelder-Mead evaluates no point with a coordinate larger than this in
+// magnitude; nelder_mead_impl.hpp (check_range) says why the factor is
+// n + 5.
+constexpr double nelder_mead_range_limit(std::size_t n) noexcept {
+    return std::numeric_limits<double>::max() / static_cast<double>(n + 5);
+}
+
+// x0 and the initial vertices are input, so a coordinate of either beyond
+// Nelder-Mead's range makes the problem invalid rather than the run fail.
+// Runs after validate_options, which has checked the bounds and that
+// x0 +- initial_step is finite.
+inline void validate_nelder_mead_range(const char* where, const Options& o,
+                                       std::span<const double> x0) {
+    const double limit = nelder_mead_range_limit(x0.size());
+    const Bounds* b = o.bounds ? &*o.bounds : nullptr;
+    for (std::size_t i = 0; i < x0.size(); ++i) {
+        if (std::fabs(x0[i]) > limit)
+            fail(where, "x0 is beyond DBL_MAX / (n + 5) at coordinate " + std::to_string(i) +
+                            ", the range in which the method's arithmetic stays finite");
+        if (std::fabs(axis_vertex(b, x0, i, o.initial_step)) > limit)
+            fail(where, "the initial vertex along coordinate " + std::to_string(i) +
+                            " is beyond DBL_MAX / (n + 5), the range in which the method's "
+                            "arithmetic stays finite; initial_step is too large for x0");
+    }
 }
 
 }  // namespace flop::detail

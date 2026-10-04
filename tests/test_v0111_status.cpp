@@ -274,7 +274,7 @@ TEST(V0111Status, EveryCapGivesAPrefixOfTheUncappedRun) {
     // the first k points of the uncapped run, never k + 1, and returns the
     // best of them, with the radius of the last simplex it evaluated whole.
     // The staircase shrinks constantly, so the cap lands inside shrinks too,
-    // where the radius is pinned red for 0.1.1.2.
+    // where that is the simplex before the shrink.
     for (auto* f : {&v0111::sphere, &staircase}) {
         const Vec x0(3, 0.0);
         flop::nelder_mead::Options base = v0111::options(1.0, 100000);
@@ -355,8 +355,8 @@ TEST(V0111Status, TheCapIsExactInsideEveryKindOfStep) {
 }
 
 TEST(V0111Status, FinalRadiusOnACapInsideAShrinkIsTheLastEvaluatedSimplex) {
-    // Pinned red for 0.1.1.2. The shrink moves s1 and s2 halfway to s0; the
-    // cap admits the first new point and refuses the second. The last
+    // The shrink moves s1 and s2 halfway to s0; the cap admits the first new
+    // point and refuses the second. The last
     // simplex whose every vertex was evaluated is {s0, s1, s2}, radius 1.
     Table t = start_table();
     t.set(xr(), 4.0).set(xcc(), 3.5).set(v1(), 2.5);
@@ -373,8 +373,8 @@ TEST(V0111Status, FinalRadiusWhileTheFirstSimplexIsIncompleteIsTheInitialStep) {
         }
     }
     {
-        // Pinned red for 0.1.1.2: inside a box narrower than initial_step the
-        // placed vertices sit 0.25 away, but none of them was evaluated.
+        // Inside a box narrower than initial_step the placed vertices sit
+        // 0.25 away, but none of them was evaluated.
         flop::nelder_mead::Options o = v0111::options(1.0, 1);
         const Vec lo(2, 0.0), hi(2, 0.25);
         o.bounds = flop::Bounds::box(lo, hi);
@@ -387,10 +387,18 @@ TEST(V0111Status, FinalRadiusWhileTheFirstSimplexIsIncompleteIsTheInitialStep) {
 // The precision floor
 // ============================================================================
 
-TEST(V0111Status, WithOnlyACapTheRunEndsAtThePrecisionFloor) {
-    // epsilon * max(initial_step, max |x_1|), at three scales: around 1,
-    // around 1e6 (the floor follows the coordinates), and around 1e-6 with a
-    // step to match (the floor follows the step).
+TEST(V0111Status, WithOnlyACapTheRunEndsAtThePrecisionOfTheArithmetic) {
+    // The floor epsilon * max(initial_step, max |x_1|), at three scales:
+    // around 1, around 1e6 (the floor follows the coordinates), and around
+    // 1e-6 with a step to match (the floor follows the step). A run that
+    // cannot reach the floor ends at a shrink that moves no vertex instead:
+    // a coordinate stays put only when sigma times its distance from the
+    // best vertex rounds back to that distance, which needs the distance to
+    // be at most 1 / (2 (1 - sigma)) units in the last place, n / 2 for Gao
+    // and Han's sigma = 1 - 1/n and 1 for the standard 1/2. A unit in the last
+    // place is at most epsilon times the coordinate, and one more unit covers
+    // the rounding of the shrunk point, so the radius is at most
+    // (max(1, n / 2) + 1) epsilon * scale either way.
     struct Case {
         double offset;
         double scale;
@@ -416,19 +424,22 @@ TEST(V0111Status, WithOnlyACapTheRunEndsAtThePrecisionFloor) {
         EXPECT_EQ(run.r.status, flop::Status::RoundoffLimited) << c.offset << " " << c.n;
         double scale = c.step;
         for (const double v : run.r.x) scale = std::max(scale, std::fabs(v));
-        EXPECT_LE(run.r.final_radius, std::numeric_limits<double>::epsilon() * scale);
+        const double units = std::max(1.0, 0.5 * static_cast<double>(c.n)) + 1.0;
+        EXPECT_LE(run.r.final_radius, units * std::numeric_limits<double>::epsilon() * scale)
+            << c.offset << " " << c.n;
         EXPECT_FALSE(flop::converged(run.r.status));
         expect_reference_agrees(x0, o, run);
     }
 }
 
-TEST(V0111Status, ThePrecisionFloorIsReachableAtEveryScale) {
-    // Pinned red for 0.1.1.2. The floor epsilon * max(h, max |x_1|) lies
-    // between one and two units in the last place of the largest coordinate,
-    // and a simplex can stall at two: a shrink by sigma = 3/4 (Gao and Han
-    // at n = 4) of a vertex two units away rounds back onto it, so the run
-    // shrinks until the cap. Around 1e6 (floor 1.9 units) and around 1.1 on
-    // the 4-d staircase (floor 1.12 units), both with nothing but a cap.
+TEST(V0111Status, ARunBelowTheFloorsReachEndsAtAShrinkThatMovesNothing) {
+    // The floor epsilon * max(h, max |x_1|) lies between one and two units in
+    // the last place of the largest coordinate, and a simplex can stall at
+    // two: a shrink by sigma = 3/4 (Gao and Han at n = 4) of a vertex two
+    // units away rounds back onto it. That shrink would repeat forever; it
+    // is a RoundoffLimited verdict instead, well before the cap. Around 1e6
+    // (floor 1.9 units) and around 1.1 on the 4-d staircase (floor 1.12
+    // units), both with nothing but a cap.
     const double offset = 1e6;
     auto far = [&](std::span<const double> x) {
         double s = 0.0;

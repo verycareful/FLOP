@@ -24,6 +24,7 @@
 #include <cstddef>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 #include "flop/detail/fp.hpp"
@@ -187,24 +188,40 @@ TEST(V0111Fp, SignedZerosAndSubnormalsAreOrdinaryValues) {
 }
 
 TEST(V0111Fp, NoNonFiniteCoordinateIsEverHandedToTheObjective) {
-    // Pinned red for 0.1.1.2.
     {
-        // x0 + h overflows: x0 = 0.75 DBL_MAX, h = 0.5 DBL_MAX.
+        // x0 + h overflows: x0 = 0.75 DBL_MAX, h = 0.5 DBL_MAX. The initial
+        // simplex is input, so both algorithms refuse it at entry, before the
+        // objective is called at all.
         Watchful f{.f = falling};
-        (void)flop::nelder_mead::minimize(f, Vec{0.75 * kMax}, v0111::options(0.5 * kMax, 10));
+        EXPECT_THROW(
+            (void)flop::nelder_mead::minimize(f, Vec{0.75 * kMax}, v0111::options(0.5 * kMax, 10)),
+            std::invalid_argument);
         EXPECT_EQ(f.non_finite, 0u) << "nelder_mead, initial simplex";
         Watchful g{.f = falling};
         flop::cobyla::Options co;
         co.initial_step = 0.5 * kMax;
         co.stopping.max_evaluations = 10;
-        (void)flop::cobyla::minimize(g, Vec{0.75 * kMax}, co);
+        EXPECT_THROW((void)flop::cobyla::minimize(g, Vec{0.75 * kMax}, co), std::invalid_argument);
         EXPECT_EQ(g.non_finite, 0u) << "cobyla, initial simplex";
     }
     {
-        // The initial simplex is finite (0.6 and 0.9 DBL_MAX), f falls with
-        // x, so the reflection x_1 + (x_1 - x_2) = 1.2 DBL_MAX overflows.
+        // x0 = 0.6 DBL_MAX, h = 0.3 DBL_MAX: both initial points are finite,
+        // but x0 is beyond DBL_MAX / (n + 5), the range in which Nelder-Mead's
+        // centroid and trial points cannot overflow, so it is refused too.
         Watchful f{.f = falling};
-        (void)flop::nelder_mead::minimize(f, Vec{0.6 * kMax}, v0111::options(0.3 * kMax, 10));
-        EXPECT_EQ(f.non_finite, 0u) << "nelder_mead, reflection";
+        EXPECT_THROW(
+            (void)flop::nelder_mead::minimize(f, Vec{0.6 * kMax}, v0111::options(0.3 * kMax, 10)),
+            std::invalid_argument);
+        EXPECT_EQ(f.non_finite, 0u) << "nelder_mead, x0 beyond the range";
+    }
+    {
+        // From 0 with h = 1, f falls without bound: every iteration expands,
+        // the simplex grows geometrically, and the run ends with an error at
+        // the first point beyond the range instead of handing on an
+        // overflowed one.
+        Watchful f{.f = falling};
+        EXPECT_THROW((void)flop::nelder_mead::minimize(f, Vec{0.0}, v0111::options(1.0, 100000)),
+                     std::runtime_error);
+        EXPECT_EQ(f.non_finite, 0u) << "nelder_mead, an objective unbounded below";
     }
 }

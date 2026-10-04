@@ -7,6 +7,109 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.1.2] - 2026-10-04 15:19 IST
+
+The fixes the Nelder-Mead test release pinned. All six defects 0.1.1.1
+pinned red are fixed, as is the spread overflow it listed without a pin;
+the same overflow turned up in COBYLA's f tolerance test and is fixed
+there too. The largest change is on a box: the face test is gone, and a
+poll ladder taken from Lewis and Torczon's coordinate search now certifies
+every stop on a box the run has touched.
+
+### Added
+
+- The poll ladder. Once the box has acted on a run (a trial point was
+  projected, or an initial vertex was moved by a bound), every stop
+  verdict is preceded by coordinate polls at the best vertex, `+-d e_i`
+  clipped to the box, for `d = initial_step` halved down to the scale of
+  the stop. A better point restarts the method with a fresh simplex of
+  edge `d`; when no rung improves, the stop stands. The polls are those of
+  R. M. Lewis and V. Torczon, "Pattern search algorithms for bound
+  constrained minimization" (SIAM Journal on Optimization 9(4), 1999),
+  section 6.1, Fig. 3.3 and Fig. 4.1; the algorithm page lists the two
+  differences. With a batch objective each rung is one call of up to `2n`
+  points. A box that never binds leaves a run exactly the unbounded one.
+- A coordinate range for Nelder-Mead: no point is evaluated with a
+  coordinate beyond `DBL_MAX / (n + 5)`, inside which nothing the method
+  computes can overflow. An `x0` or initial vertex beyond it is
+  `std::invalid_argument`; a later point beyond it, in practice an
+  objective unbounded below, ends the run with `std::runtime_error`.
+- Both algorithms refuse an `initial_step` for which `x0 +- initial_step`
+  overflows, with `std::invalid_argument`, and COBYLA ends a run with
+  `std::runtime_error` before forming a trial point beyond the largest
+  double.
+- Four test suites: the shrink in rounded arithmetic and the radius it
+  leaves; when the ladder runs, its bottom rung, and both channels through
+  it; the coordinate range, at entry and at run time; and the f tolerance
+  tests at the ends of the finite range.
+
+### Changed
+
+- A shrink evaluates only the vertices it moved. Rounded, a vertex a few
+  units in the last place from the best one can land back on itself, and
+  its value is already known; with a batch objective the shrink is one
+  call of the moved vertices.
+- An initial vertex is chosen by the point, not the room:
+  `x0 + initial_step` when that point is in the box, else
+  `x0 - initial_step`, else the bound with more room, the bound itself.
+- The 0.1.1.1 tests that pinned the face test now pin the ladder, and the
+  reference transcription in the test tree models the ladder, the shrink
+  and the initial vertex. Three of the tests that were red are renamed,
+  since their old names describe what is no longer true:
+  `ThePrecisionFloorIsReachableAtEveryScale` is
+  `ARunBelowTheFloorsReachEndsAtAShrinkThatMovesNothing`,
+  `WithOnlyACapTheRunEndsAtThePrecisionFloor` is
+  `WithOnlyACapTheRunEndsAtThePrecisionOfTheArithmetic` (both
+  `V0111Status`), and `ARunWithOnlyACapStillGetsTheFaceTest` is
+  `V0111Bounds.ARunWithOnlyACapStillGetsTheLadder`.
+- `docs/algorithms/nelder-mead.md`: box bounds, the initial simplex, the
+  stopping rules, batch evaluation, two new deviations (the shrink in
+  rounded arithmetic, the coordinate range), the ladder checked against
+  Lewis and Torczon, and the limits the ladder leaves. The API pages for
+  Nelder-Mead, COBYLA and `Result` state the new exceptions, the batch
+  calls and the rule for `final_radius`.
+
+### Fixed
+
+- A run whose simplex stalls above the precision floor no longer shrinks
+  until the cap or forever. A shrink that moves no vertex would repeat
+  itself; it is now a `RoundoffLimited` verdict, decided before anything
+  is evaluated. The floor stays.
+- A convex problem on a box no longer stops next to a face, or near a
+  corner, away from its minimiser: the ladder finds the better points off
+  the face and restarts the method. On a corner of the box in five
+  dimensions the run now lands on the corner exactly.
+- A run with only a cap gets the box check before `RoundoffLimited`, as
+  before every other stop.
+- An initial vertex moved to a bound lands on the bound, in both
+  algorithms; `x0 + (bound - x0)` rounded past it.
+- No non-finite coordinate is ever handed to the objective (the
+  validation and the run-time errors above).
+- `Result::final_radius` is the radius of the last simplex whose every
+  vertex was evaluated, and `initial_step` while the first one is
+  incomplete, after a cap or `stop_value` inside a shrink, a restart or the
+  first simplex alike. A batch shrink that meets `stop_value` has
+  evaluated all its points, so its simplex is the one reported.
+- The f tolerance tests no longer form a difference beyond the largest
+  double (objective values near `-DBL_MAX` and `+DBL_MAX` together) or a
+  product `ftol_rel * |f|` beyond it when `ftol_rel > 1`, in Nelder-Mead's
+  spread and COBYLA's fall alike. The comparison is written so that even
+  `-ffast-math`, which may regroup any sum, has no expression to regroup
+  into an overflow.
+- Two comments: Gao and Han's coefficients are their section 4.1, formula
+  (4.1), and the batch entry point lists every call it makes.
+- A corpus test threw a type not derived from `std::exception`, which
+  newer clang-tidy rejects.
+
+### Results
+
+300 tests across 30 suites, all passed in both binaries, strict and
+-ffast-math, on every tree (2.8 to 3.3 s per binary; Linux x86-64; GCC
+16.2.1, GCC 14.3.1, clang 23.1.1, and GCC 16.2.1 with the library under
+-ffast-math). The clang -ffast-math binary skips the two tests that hand a
+NaN back through the objective's return value, as in every release since
+0.1.0.1.
+
 ## [0.1.1.1] - 2026-10-04 13:27 IST
 
 The test release for Nelder-Mead. No library behaviour changes. The suite

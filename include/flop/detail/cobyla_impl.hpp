@@ -58,6 +58,7 @@
 #include "flop/detail/cobyla_step.hpp"
 #include "flop/detail/evaluator.hpp"
 #include "flop/detail/fp.hpp"
+#include "flop/detail/tolerance.hpp"
 #include "flop/options.hpp"
 #include "flop/result.hpp"
 
@@ -178,6 +179,23 @@ private:
         return true;
     }
 
+    // x_ = base_ + d_. A coordinate sum leaves the finite range only when
+    // both terms have one sign and |d_i| > max - |base_i|; that is tested
+    // before the sum is formed, and the run ends with an error instead: a
+    // point there cannot be handed to the objective, and the base can only
+    // have travelled that far on an objective unbounded below.
+    void form_trial_point() {
+        for (std::size_t i = 0; i < n_; ++i) {
+            const double& b = base_[i];
+            const double& d = d_[i];
+            if ((b >= 0.0) == (d >= 0.0) && std::fabs(d) > kMaxFinite - std::fabs(b))
+                throw std::runtime_error(
+                    "flop::cobyla: a trial point has a coordinate beyond the largest double; the "
+                    "objective may be unbounded below");
+        }
+        for (std::size_t i = 0; i < n_; ++i) x_[i] = base_[i] + d_[i];
+    }
+
     bool cap_reached() {
         if (opts_.stopping.max_evaluations > 0 && evals_ >= opts_.stopping.max_evaluations) {
             stop(Status::MaxEvaluationsReached);
@@ -284,11 +302,11 @@ private:
         for (std::size_t k = 0; k < m_; ++k) cj[k] = c[k];
     }
 
-    // The displacement of initial vertex i along coordinate i: +rho when the
-    // box allows it, else -rho, else whichever side has more room, shrunk to
-    // that room (box.hpp). Without bounds it is always +rho.
-    [[nodiscard]] double initial_offset(std::size_t i) const {
-        return axis_offset(bounds_, base_, i, rho_);
+    // Coordinate i of initial vertex i: base + rho when the box allows it,
+    // else base - rho, else the bound on the side with more room (box.hpp).
+    // Without bounds it is always base + rho.
+    [[nodiscard]] double initial_vertex(std::size_t i) const {
+        return axis_vertex(bounds_, base_, i, rho_);
     }
 
     // Section 2: the n + 1 initial points, x0 and x0 displaced along each
@@ -309,7 +327,7 @@ private:
             std::vector<double> out(n_ + 1);
             for (std::size_t slot = 0; slot <= n_; ++slot) {
                 for (std::size_t i = 0; i < n_; ++i) points[slot * n_ + i] = base_[i];
-                if (slot > 0) points[slot * n_ + (slot - 1)] += initial_offset(slot - 1);
+                if (slot > 0) points[slot * n_ + (slot - 1)] = initial_vertex(slot - 1);
                 xs[slot] = std::span<const double>(points.data() + slot * n_, n_);
             }
             eval_.batch(xs, out);
@@ -333,7 +351,7 @@ private:
         if (done_) return;
         for (std::size_t j = 0; j < n_; ++j) {
             for (std::size_t i = 0; i < n_; ++i) x_[i] = base_[i];
-            x_[j] += initial_offset(j);
+            x_[j] = initial_vertex(j);
             if (!evaluate(x_, f, cbuf_, v)) return;
             for (std::size_t i = 0; i < n_; ++i) d_[i] = x_[i] - base_[i];
             replace_vertex(j, d_);
@@ -448,7 +466,7 @@ private:
             return false;
         }
         geometry_blocked_ = false;
-        for (std::size_t i = 0; i < n_; ++i) x_[i] = base_[i] + d_[i];
+        form_trial_point();
         double f = 0.0, v = 0.0;
         if (!evaluate(x_, f, cbuf_, v)) return true;
         if (dot(rj, d_) == 0.0) {
@@ -559,7 +577,7 @@ private:
         // From here the point is a trust-region point: no geometry repair
         // until a step fails.
         allow_geometry_ = false;
-        for (std::size_t i = 0; i < n_; ++i) x_[i] = base_[i] + d_[i];
+        form_trial_point();
         double f = 0.0, v = 0.0;
         if (!evaluate(x_, f, cbuf_, v)) return;
         if (done_) return;
@@ -616,10 +634,9 @@ private:
             store_vertex(jdrop, f, cbuf_, v);
             if (merit(jdrop) < merit(n_)) {
                 move_base(jdrop);
-                const double fall = f_before - fval_[n_];
                 const Stopping& s = opts_.stopping;
-                if ((s.ftol_abs > 0.0 && fall <= s.ftol_abs) ||
-                    (s.ftol_rel > 0.0 && fall <= s.ftol_rel * std::fabs(fval_[n_]))) {
+                if ((s.ftol_abs > 0.0 && difference_within_abs(f_before, fval_[n_], s.ftol_abs)) ||
+                    (s.ftol_rel > 0.0 && difference_within_rel(f_before, fval_[n_], s.ftol_rel))) {
                     stop(Status::FtolReached);
                     return;
                 }

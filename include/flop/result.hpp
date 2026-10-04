@@ -36,7 +36,9 @@ struct Result {
     Status status = Status::RoundoffLimited;
     // The scale the method had reached when it stopped: COBYLA's trust radius
     // rho, Nelder-Mead's simplex radius (the largest coordinate distance from a
-    // vertex to the best one). The x tolerances act on this quantity.
+    // vertex to the best one) of the last simplex whose every vertex was
+    // evaluated, or initial_step while the first one is incomplete. The x
+    // tolerances act on this quantity.
     double final_radius = 0.0;
     double max_constraint_violation = 0.0;  // max(0, -min_i c_i(x)); 0 without constraints
 };

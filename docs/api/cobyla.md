@@ -51,9 +51,11 @@ Every entry point returns the best point seen with the reason the run ended
 - `std::invalid_argument` at entry: empty or non-finite `x0`, no stopping
   criterion, a negative or non-finite tolerance, a non-positive
   `initial_step`, bounds of the wrong length, a lower bound above its upper
-  bound, or `x0` outside the bounds.
+  bound, `x0` outside the bounds, or an `initial_step` for which
+  `x0 +- initial_step` overflows.
 - `std::runtime_error` during the run: the objective or a constraint
-  returned a non-finite value.
+  returned a non-finite value, or a trial point would have a coordinate
+  beyond the largest double.
 - Anything the objective throws propagates unchanged.
 
 ## Example

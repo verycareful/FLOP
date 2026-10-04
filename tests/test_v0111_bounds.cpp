@@ -11,11 +11,11 @@
 // (docs/algorithms/nelder-mead.md, "Box bounds" and "The initial simplex"):
 // every trial point is projected onto the box; the initial vertex along
 // coordinate i is x0 + h e_i, or x0 - h e_i where the box forbids +h, or
-// moved to the bound on the side with more room where it forbids both; and
-// before a tolerance stop, every coordinate in which all vertices sit on one
-// bound is probed once, the best vertex moved off the bound by the radius
-// (less where the other bound is closer), with a restart from the probe when
-// it is better. Each of these is pinned to the bit on scripted runs.
+// the bound on the side with more room where it forbids both; and before
+// any stop the poll ladder runs: the best vertex +- d e_i clipped to the
+// box, for d = h, h/2, ... down to the stop's scale, with a restart from the
+// first point of least value in a rung when it is better. Each of these is
+// pinned to the bit on scripted runs.
 //
 // Pinned red for 0.1.1.2:
 //   - the initial vertex moved to a bound is computed as x0 + (bound - x0),
@@ -37,7 +37,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -52,8 +51,6 @@ namespace {
 using Vec = std::vector<double>;
 using v0111::Table;
 using v0111::Traced;
-
-constexpr double kEps = std::numeric_limits<double>::epsilon();
 
 bool inside(const flop::Bounds& b, std::span<const double> x) {
     for (std::size_t i = 0; i < x.size(); ++i) {
@@ -92,8 +89,9 @@ flop::Bounds box(const Vec& lo, const Vec& hi) {
 // in exact arithmetic (every trial point is projected onto the box):
 //   (0, 1) [x_r of s1, projected; equals s2], (0, 0.75) [x_c, projected],
 //   (0, 0) [x_r, projected], (0, 0) [x_r], (0, 0) [x_c], radius 0.
-// Then the face test probes coordinate 0, then coordinate 1, each by the
-// precision floor epsilon * max(h, 0) = epsilon.
+// xtol_abs = 0.5, so the ladder has two rungs, d = 1 and d = 0.5. From the
+// corner every minus point clips back onto it and is left out, so each rung
+// is (d, 0) then (0, d); the first rung's points are s1 and s2 again.
 Vec c00() {
     return {0.0, 0.0};
 }
@@ -106,17 +104,23 @@ Vec c01() {
 Vec c0q() {
     return {0.0, 0.75};
 }
-Vec probe0() {
-    return {kEps, 0.0};
+Vec half0() {
+    return {0.5, 0.0};
 }
-Vec probe1() {
-    return {0.0, kEps};
+Vec half1() {
+    return {0.0, 0.5};
+}
+Vec half01() {
+    return {0.5, 0.5};
 }
 
-Table corner_table(double f_probe0, double f_probe1) {
+// The values of the second rung's two points, and of (0.5, 0.5), a
+// restart's vertex from either. A Table answers with the first row that
+// matches, so every value is set here once.
+Table corner_table(double f_half0, double f_half1, double f_half01 = 4.0) {
     Table t;
     t.set(c00(), 1.0).set(c10(), 3.0).set(c01(), 2.0).set(c0q(), 1.5);
-    t.set(probe0(), f_probe0).set(probe1(), f_probe1);
+    t.set(half0(), f_half0).set(half1(), f_half1).set(half01(), f_half01);
     return t;
 }
 
@@ -187,8 +191,8 @@ TEST(V0111Bounds, EveryEvaluationIsInsideTheBox) {
             EXPECT_TRUE(inside(c.b, run.r.x)) << c.what;
         }
     }
-    // The face tests and restarts below, too.
-    const Traced corner = v0111::traced(corner_table(5.0, 0.5), c00(), corner_options(12));
+    // The ladder and a restart below, too.
+    const Traced corner = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(14));
     expect_all_inside(unit_box(), corner.trace, "the corner scenario");
 }
 
@@ -210,10 +214,9 @@ TEST(V0111Bounds, AnOptimumOutsideTheBoxLandsOnItsFace) {
 }
 
 TEST(V0111Bounds, AMinimumOnACornerInFiveDimensionsIsReached) {
-    // Pinned red for 0.1.1.2. The same problem at n = 5 stops XtolReached at
-    // xtol 1e-9 with the best vertex about 5e-8 from the corner: the simplex
-    // collapsed next to the faces rather than onto them. Ten tolerances is
-    // the stagnation bar the corpus uses.
+    // The same problem at n = 5, where the simplex can collapse next to the
+    // faces rather than onto them; the ladder's rungs reach the corner. Ten
+    // tolerances is the stagnation bar the corpus uses.
     const std::size_t n = 5;
     const Vec lo(n, -1.0), hi(n, 0.25);
     for (const bool adaptive : {false, true}) {
@@ -315,21 +318,22 @@ TEST(V0111Bounds, TheInitialSimplexFollowsTheDocumentedRule) {
     }
 }
 
-TEST(V0111Bounds, TheOffsetHelperFollowsItsRule) {
-    // flop::detail::axis_offset, shared by both algorithms: +h when the box
-    // allows it, else -h, else the larger room, signed; +h without a box.
+TEST(V0111Bounds, TheVertexHelperFollowsItsRule) {
+    // flop::detail::axis_vertex, shared by both algorithms: x + h when that
+    // point is in the box, else x - h, else the bound with more room;
+    // x + h without a box.
     const Vec x{0.0};
-    EXPECT_EQ(flop::detail::axis_offset(nullptr, x, 0, 0.5), 0.5);
+    EXPECT_EQ(flop::detail::axis_vertex(nullptr, x, 0, 0.5), 0.5);
     const flop::Bounds wide = box({-1.0}, {1.0});
-    EXPECT_EQ(flop::detail::axis_offset(&wide, x, 0, 0.5), 0.5);
+    EXPECT_EQ(flop::detail::axis_vertex(&wide, x, 0, 0.5), 0.5);
     const flop::Bounds at_hi = box({-1.0}, {0.0});
-    EXPECT_EQ(flop::detail::axis_offset(&at_hi, x, 0, 0.5), -0.5);
+    EXPECT_EQ(flop::detail::axis_vertex(&at_hi, x, 0, 0.5), -0.5);
     const flop::Bounds narrow_up = box({-0.125}, {0.25});
-    EXPECT_EQ(flop::detail::axis_offset(&narrow_up, x, 0, 0.5), 0.25);
+    EXPECT_EQ(flop::detail::axis_vertex(&narrow_up, x, 0, 0.5), 0.25);
     const flop::Bounds narrow_down = box({-0.25}, {0.125});
-    EXPECT_EQ(flop::detail::axis_offset(&narrow_down, x, 0, 0.5), -0.25);
+    EXPECT_EQ(flop::detail::axis_vertex(&narrow_down, x, 0, 0.5), -0.25);
     const flop::Bounds equal_rooms = box({-0.25}, {0.25});
-    EXPECT_EQ(flop::detail::axis_offset(&equal_rooms, x, 0, 0.5), 0.25);
+    EXPECT_EQ(flop::detail::axis_vertex(&equal_rooms, x, 0, 0.5), 0.25);
 }
 
 namespace {
@@ -355,12 +359,14 @@ const Overshoot overshoots[] = {
 }  // namespace
 
 TEST(V0111Bounds, AnInitialVertexMovedToABoundLandsOnIt) {
-    // Pinned red for 0.1.1.2 (in the strict binaries; under -ffast-math the
-    // compiler may fold x0 + (bound - x0) to the bound).
+    // The vertex is the bound itself, never x0 plus the room, which rounds
+    // past it on these boxes; then every evaluation of both algorithms stays
+    // inside.
     for (const Overshoot& c : overshoots) {
         const flop::Bounds b = box({c.lo}, {c.hi});
         const Vec x0{c.x0};
-        const double v = c.x0 + flop::detail::axis_offset(&b, x0, 0, c.h);
+        const double v = flop::detail::axis_vertex(&b, x0, 0, c.h);
+        EXPECT_TRUE(v == c.lo || v == c.hi) << c.x0 << " -> " << v;
         EXPECT_TRUE(inside(b, std::span<const double>(&v, 1))) << c.x0 << " -> " << v;
         const Traced run = v0111::traced(v0111::sphere, x0, boxed(c.h, 50, b));
         expect_all_inside(b, run.trace, "nelder_mead");
@@ -376,22 +382,40 @@ TEST(V0111Bounds, AnInitialVertexMovedToABoundLandsOnIt) {
 }
 
 // ============================================================================
-// The face test
+// The poll ladder
 // ============================================================================
 
-TEST(V0111Bounds, AFaceHoldingTheMinimumKeepsItsStopAfterOneProbe) {
+TEST(V0111Bounds, AFaceHoldingTheMinimumKeepsItsStopAfterTheLadder) {
     // f = (x + 1)^2 on [0, 8] from 0, h = 1: the reflection and the outside
-    // contraction both project onto 0, the simplex is {0, 0}, radius 0. The
-    // probe is 0 + max(radius, epsilon * max(h, |x_1|)) = epsilon, worse, so
-    // XtolReached stands after five evaluations.
+    // contraction both project onto 0, the simplex is {0, 0}, radius 0, and
+    // XtolReached. The ladder polls d = 1, 1/2, ... down to the last power of
+    // two not below xtol_abs = 1e-9, which is 2^-29; each rung is the one
+    // point d (the minus point clips back onto 0), every one worse, so the
+    // stop stands after 4 + 30 evaluations.
     auto f = [](std::span<const double> x) { return (x[0] + 1.0) * (x[0] + 1.0); };
     flop::nelder_mead::Options o = boxed(1.0, 100, box({0.0}, {8.0}));
     o.stopping.xtol_abs = 1e-9;
     const Traced run = v0111::traced(f, Vec{0.0}, o);
     EXPECT_EQ(run.r.status, flop::Status::XtolReached);
-    expect_points(run.trace, {{0.0}, {1.0}, {0.0}, {0.0}, {kEps}});
+    std::vector<Vec> want{{0.0}, {1.0}, {0.0}, {0.0}};
+    for (int k = 0; std::ldexp(1.0, -k) >= o.stopping.xtol_abs; ++k)
+        want.push_back({std::ldexp(1.0, -k)});
+    ASSERT_EQ(want.size(), 34u);
+    expect_points(run.trace, want);
     EXPECT_TRUE(v0111::same_bits(run.r.x, Vec{0.0}));
     EXPECT_EQ(run.r.final_radius, 0.0);
+}
+
+TEST(V0111Bounds, TheRungsRunFromTheInitialStepDownToTheXTolerance) {
+    // Both rungs of the corner scenario worse: the stop stands after them.
+    Table t = corner_table(5.0, 5.0);
+    const Traced run = v0111::traced(t, c00(), corner_options(100));
+    std::vector<Vec> want = corner_path();
+    for (const Vec& p : {c10(), c01(), half0(), half1()}) want.push_back(p);
+    expect_points(run.trace, want);
+    EXPECT_EQ(run.r.status, flop::Status::XtolReached);
+    EXPECT_EQ(run.r.final_radius, 0.0);
+    EXPECT_EQ(t.misses(), 0u);
 }
 
 namespace {
@@ -400,8 +424,10 @@ namespace {
 // shrunk to the room, s1 = (b, 0); s2 = (0, 2). Ranked s0, s2, s1 (f = 1,
 // 2, 3): x_r of s1 projects onto (0, 2) = s2 (f = 2 = f_n), so an outside
 // contraction, projected onto (0, 1.5), accepted at f = 0.875. Every vertex
-// now has x = 0 and the spread is 2 - 0.875 = 1.125, the f tolerance: the
-// face test probes the best vertex (0, 1.5) by the radius, 1.5, in x.
+// now has x = 0 and the spread is 2 - 0.875 = 1.125, the f tolerance. The
+// ladder's bottom for an f stop is the radius, 1.5, so it has the one rung
+// d = 2 from (0, 1.5): (min(2, b), 1.5), (0, 3.5) and (0, -0.5), the x minus
+// point clipping back onto the best vertex.
 Vec g0() {
     return {0.0, 0.0};
 }
@@ -411,10 +437,17 @@ Vec g2() {
 Vec gc() {
     return {0.0, 1.5};
 }
+Vec gup() {
+    return {0.0, 3.5};
+}
+Vec gdown() {
+    return {0.0, -0.5};
+}
 
 Table face_table(const Vec& s1, const Vec& probe, double f_probe) {
     Table t;
     t.set(g0(), 1.0).set(s1, 3.0).set(g2(), 2.0).set(gc(), 0.875).set(probe, f_probe);
+    t.set(gup(), 4.0).set(gdown(), 4.0);
     return t;
 }
 
@@ -429,123 +462,109 @@ flop::nelder_mead::Options face_options(double b, std::size_t cap) {
 
 }  // namespace
 
-TEST(V0111Bounds, TheProbeIsDisplacedByTheRadiusOrLessWhereTheOtherBoundIsCloser) {
+TEST(V0111Bounds, AnFStopRunsItsRungsDownToTheRadiusClippedToTheBox) {
     {
-        // x in [0, 8]: the probe is the full radius off the face.
+        // x in [0, 8]: the x plus point is the full step off the face.
         const Vec s1{2.0, 0.0};
-        const Vec probe{1.5, 1.5};
+        const Vec probe{2.0, 1.5};
         Table t = face_table(s1, probe, 4.0);
         const Traced run = v0111::traced(t, g0(), face_options(8.0, 100));
         EXPECT_EQ(run.r.status, flop::Status::FtolReached);
-        expect_points(run.trace, {g0(), s1, g2(), g2(), gc(), probe});
+        expect_points(run.trace, {g0(), s1, g2(), g2(), gc(), probe, gup(), gdown()});
+        EXPECT_EQ(t.misses(), 0u);
     }
     {
-        // x in [0, 0.25]: the other bound is closer than the radius.
+        // x in [0, 0.25]: the x plus point is clipped to the other bound.
         const Vec s1{0.25, 0.0};
         const Vec probe{0.25, 1.5};
         Table t = face_table(s1, probe, 4.0);
         const Traced run = v0111::traced(t, g0(), face_options(0.25, 100));
         EXPECT_EQ(run.r.status, flop::Status::FtolReached);
-        expect_points(run.trace, {g0(), s1, g2(), g2(), gc(), probe});
+        expect_points(run.trace, {g0(), s1, g2(), g2(), gc(), probe, gup(), gdown()});
         EXPECT_TRUE(v0111::same_bits(run.r.x, gc()));
+        EXPECT_EQ(t.misses(), 0u);
     }
 }
 
-TEST(V0111Bounds, ABetterProbeRestartsWithOnlyNNewPoints) {
-    // The probe (0.25, 1.5) is better, so the method starts again from it:
-    // the probe is slot 0 and is not evaluated again; the n new vertices
-    // follow the initial-simplex rule from it (x: no room up, 0.25 down, so
-    // to the lower bound, (0, 1.5); y: +2, (0.25, 3.5)).
+TEST(V0111Bounds, ABetterRungPointRestartsWithOnlyNNewPoints) {
+    // The rung's (0.25, 1.5) is better, so after the whole rung the method
+    // starts again from it with a simplex of size d = 2: the point is slot 0
+    // and is not evaluated again; the n new vertices follow the initial
+    // simplex rule from it (x: no room up, 0.25 down, so to the lower bound,
+    // (0, 1.5); y: +2, (0.25, 3.5)).
     const Vec s1{0.25, 0.0};
     const Vec probe{0.25, 1.5};
     Table t = face_table(s1, probe, 0.5);
     t.set({0.25, 3.5}, 4.0);
-    const Traced run = v0111::traced(t, g0(), face_options(0.25, 8));
-    expect_points(run.trace, {g0(), s1, g2(), g2(), gc(), probe, gc(), {0.25, 3.5}});
+    const Traced run = v0111::traced(t, g0(), face_options(0.25, 10));
+    expect_points(run.trace,
+                  {g0(), s1, g2(), g2(), gc(), probe, gup(), gdown(), gc(), {0.25, 3.5}});
     EXPECT_EQ(run.r.status, flop::Status::MaxEvaluationsReached);
     EXPECT_TRUE(v0111::same_bits(run.r.x, probe));
 }
 
-TEST(V0111Bounds, FlatCoordinatesAreProbedInCoordinateOrder) {
+TEST(V0111Bounds, TheRestartIsFromTheFirstPointOfLeastValueInTheWholeRung) {
     {
-        // Both probes worse: the stop stands after both.
-        const Traced run = v0111::traced(corner_table(5.0, 5.0), c00(), corner_options(100));
+        // (0, 0.5) is the better of the two: the restart is from it, with
+        // the simplex of size 0.5, (0.5, 0.5) and (0, 1).
+        const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(14));
         std::vector<Vec> want = corner_path();
-        want.push_back(probe0());
-        want.push_back(probe1());
-        expect_points(run.trace, want);
-        EXPECT_EQ(run.r.status, flop::Status::XtolReached);
-        EXPECT_EQ(run.r.final_radius, 0.0);
-    }
-    {
-        // The second probe better: restart from it, with its two new
-        // vertices (x: +1, (1, eps); y: both rooms below 1, the larger is
-        // up, to the bound, (0, 1)).
-        const Traced run = v0111::traced(corner_table(5.0, 0.5), c00(), corner_options(12));
-        std::vector<Vec> want = corner_path();
-        want.push_back(probe0());
-        want.push_back(probe1());
-        want.push_back({1.0, kEps});
-        want.push_back({0.0, 1.0});
+        for (const Vec& p : {c10(), c01(), half0(), half1(), half01(), c01()}) want.push_back(p);
         expect_points(run.trace, want);
     }
     {
-        // The first probe better: restart at once, the second never probed
-        // (x: rooms 1 - eps and eps, to the upper bound, (1, 0); y: +1,
-        // (eps, 1)).
-        const Traced run = v0111::traced(corner_table(0.5, 5.0), c00(), corner_options(11));
+        // A tie: the first, (0.5, 0), after the whole rung; its simplex is
+        // (1, 0) and (0.5, 0.5).
+        const Traced run = v0111::traced(corner_table(0.5, 0.5), c00(), corner_options(14));
         std::vector<Vec> want = corner_path();
-        want.push_back(probe0());
-        want.push_back({1.0, 0.0});
-        want.push_back({kEps, 1.0});
+        for (const Vec& p : {c10(), c01(), half0(), half1(), c10(), half01()}) want.push_back(p);
         expect_points(run.trace, want);
     }
 }
 
-TEST(V0111Bounds, ProbesAndRestartPointsAreEvaluationsLikeAnyOther) {
+TEST(V0111Bounds, RungPointsAndRestartPointsAreEvaluationsLikeAnyOther) {
     {
-        // The cap refuses the second probe: MaxEvaluationsReached, and the
+        // The cap inside the second rung: MaxEvaluationsReached, and the
         // radius is the flat simplex's.
-        const Traced run = v0111::traced(corner_table(5.0, 5.0), c00(), corner_options(9));
+        const Traced run = v0111::traced(corner_table(5.0, 5.0), c00(), corner_options(10));
         EXPECT_EQ(run.r.status, flop::Status::MaxEvaluationsReached);
-        EXPECT_EQ(run.r.evaluations, 9u);
+        EXPECT_EQ(run.r.evaluations, 10u);
         EXPECT_EQ(run.r.final_radius, 0.0);
     }
     {
-        // stop_value met at a probe.
+        // stop_value met at a rung point.
         flop::nelder_mead::Options o = corner_options(100);
         o.stopping.stop_value = 0.6;
-        const Traced run = v0111::traced(corner_table(5.0, 0.5), c00(), o);
+        const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), o);
         EXPECT_EQ(run.r.status, flop::Status::StopValueReached);
-        EXPECT_EQ(run.r.evaluations, 10u);
-        EXPECT_TRUE(v0111::same_bits(run.r.x, probe1()));
+        EXPECT_EQ(run.r.evaluations, 12u);
+        EXPECT_TRUE(v0111::same_bits(run.r.x, half1()));
     }
     {
         // stop_value met at a restart's first new vertex.
         flop::nelder_mead::Options o = corner_options(100);
         o.stopping.stop_value = 0.2;
-        Table t = corner_table(5.0, 0.5);
-        t.set({1.0, kEps}, 0.1);
+        Table t = corner_table(0.7, 0.5, 0.1);
         const Traced run = v0111::traced(t, c00(), o);
         EXPECT_EQ(run.r.status, flop::Status::StopValueReached);
-        EXPECT_EQ(run.r.evaluations, 11u);
-        EXPECT_TRUE(v0111::same_bits(run.r.x, Vec{1.0, kEps}));
+        EXPECT_EQ(run.r.evaluations, 13u);
+        EXPECT_TRUE(v0111::same_bits(run.r.x, half01()));
     }
 }
 
 TEST(V0111Bounds, FinalRadiusOnACapInsideARestartIsTheLastEvaluatedSimplex) {
-    // Pinned red for 0.1.1.2. The cap admits the restart's first new vertex
-    // and refuses the second. The last simplex whose every vertex was
-    // evaluated is the flat one at the corner, radius 0.
-    const Traced run = v0111::traced(corner_table(5.0, 0.5), c00(), corner_options(11));
+    // The cap admits the restart's first new vertex and refuses the second.
+    // The last simplex whose every vertex was evaluated is the flat one at
+    // the corner, radius 0.
+    const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(13));
     ASSERT_EQ(run.r.status, flop::Status::MaxEvaluationsReached);
     EXPECT_EQ(run.r.final_radius, 0.0);
 }
 
 TEST(V0111Bounds, RestartsStartFromStrictlyLowerValuesAndTheRunEnds) {
-    // A convex problem whose simplex is driven onto two faces more than
-    // once: each restart is from a probe strictly better than the best
-    // vertex, so there are finitely many, and the run ends before the cap.
+    // A convex problem whose simplex is driven onto two faces: each restart
+    // is from a rung point strictly better than the best vertex, so there
+    // are finitely many, and the run ends before the cap.
     auto f = [](std::span<const double> x) {
         return (x[0] - 0.125) * (x[0] - 0.125) + (x[1] - 0.25) * (x[1] - 0.25);
     };
@@ -562,17 +581,19 @@ TEST(V0111Bounds, RestartsStartFromStrictlyLowerValuesAndTheRunEnds) {
     for (const v0111::Step& s : ref.steps) {
         if (s.termination != v0111::Termination::Restart) continue;
         EXPECT_LT(s.after[0].f, s.before[0].f);
-        EXPECT_EQ(s.evaluations, 1u + 2u);  // the probe and n new vertices
+        // The improving rung (1 to 2n points) and the n new vertices.
+        EXPECT_GE(s.evaluations, 1u + 2u);
+        EXPECT_LE(s.evaluations, 4u + 2u);
     }
     expect_all_inside(b, run.trace, "restarts");
 }
 
 TEST(V0111Bounds, AConvexProblemWithItsMinimumOffTheFaceReachesIt) {
-    // Pinned red for 0.1.1.2. f = (x - 0.25)^2 on [0, 8] from 0, h = 1: flat
-    // on x = 0, the probe at epsilon is better, the restart's simplex
-    // {epsilon, 1 + epsilon} collapses back onto {epsilon, 0} and the run
-    // ends XtolReached at x = epsilon, f = 0.0625. In two dimensions the
-    // same happens at (epsilon, epsilon) after two restarts.
+    // f = (x - 0.25)^2 on [0, 8] from 0, h = 1: the projected reflection and
+    // contraction flatten the simplex onto x = 0, and a stop there would be
+    // a quarter away from the minimiser. The ladder's rungs find the better
+    // points off the face and the run ends within ten tolerances of 0.25.
+    // In two dimensions the simplex flattens onto both faces.
     {
         auto f = [](std::span<const double> x) { return (x[0] - 0.25) * (x[0] - 0.25); };
         flop::nelder_mead::Options o = boxed(1.0, 5000, box({0.0}, {8.0}));
@@ -593,13 +614,19 @@ TEST(V0111Bounds, AConvexProblemWithItsMinimumOffTheFaceReachesIt) {
     }
 }
 
-TEST(V0111Bounds, ARunWithOnlyACapStillGetsTheFaceTest) {
-    // Pinned red for 0.1.1.2. The same f, no tolerance: the flat simplex
-    // {0, 0} reaches the precision floor and the run ends RoundoffLimited
-    // after four evaluations, without the probe at epsilon that a tolerance
-    // stop would have made.
+TEST(V0111Bounds, ARunWithOnlyACapStillGetsTheLadder) {
+    // The same f, no tolerance: the flat simplex {0, 0} reaches the
+    // precision floor, a RoundoffLimited verdict, and the ladder runs before
+    // it as before any other: d = 1 (f = 0.5625, worse), d = 1/2 (f = 0.0625,
+    // equal, not better), d = 1/4, the minimiser itself, where f is exactly
+    // zero. Nothing can be better than zero, so the result is that point.
     auto f = [](std::span<const double> x) { return (x[0] - 0.25) * (x[0] - 0.25); };
     const Traced run = v0111::traced(f, Vec{0.0}, boxed(1.0, 2000, box({0.0}, {8.0})));
-    ASSERT_GE(run.trace.size(), 5u);
-    EXPECT_TRUE(v0111::same_bits(run.trace[4].x, Vec{kEps}));
+    ASSERT_GE(run.trace.size(), 7u);
+    EXPECT_TRUE(v0111::same_bits(run.trace[4].x, Vec{1.0}));
+    EXPECT_TRUE(v0111::same_bits(run.trace[5].x, Vec{0.5}));
+    EXPECT_TRUE(v0111::same_bits(run.trace[6].x, Vec{0.25}));
+    EXPECT_EQ(run.r.status, flop::Status::RoundoffLimited);
+    EXPECT_TRUE(v0111::same_bits(run.r.x, Vec{0.25}));
+    EXPECT_EQ(run.r.f, 0.0);
 }

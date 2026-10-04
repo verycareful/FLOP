@@ -41,7 +41,7 @@ the largest constraint violation). Algorithm-specific settings extend
 What more than one algorithm needs lives under `flop/detail/` once:
 `evaluator.hpp` puts the scalar and the batch objective behind one
 interface, so a solver is written once for both channels; `box.hpp` holds
-the initial-simplex offset that respects a box and the projection onto it;
+the initial vertex that respects a box and the projection onto it;
 `validate.hpp` holds every check made at entry.
 
 `Status` names why the run stopped. Reaching the evaluation cap is a status

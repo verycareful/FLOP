@@ -13,15 +13,18 @@
 // Derivative-free minimisation of f(x), optionally inside box bounds, by a
 // simplex of n + 1 points that reflects, expands, contracts and shrinks. Two
 // entry points, one algorithm: a scalar or a batch objective. The batch
-// objective is used where the method has independent points, the initial
-// simplex (n + 1 points) and a shrink (n points); every other evaluation is
-// one point. The method has no nonlinear constraints, and there is no entry
-// point that takes them.
+// objective is used where the method has independent points: the initial
+// simplex (n + 1 points), a shrink (the vertices it moved), a rung of the
+// poll ladder on a box (up to 2n points) and a restart's simplex (n points);
+// every other evaluation is one point. The method has no nonlinear
+// constraints, and there is no entry point that takes them.
 //
 // Every entry point validates its input and throws std::invalid_argument on a
 // malformed problem; after that nothing throws for input. An objective that
 // returns a non-finite value ends the run with std::runtime_error, where the
-// compiler lets the value reach memory.
+// compiler lets the value reach memory, and so does a point the method would
+// evaluate beyond DBL_MAX / (n + 5), the range in which its arithmetic stays
+// finite (an objective unbounded below).
 //
 // Example:
 //
@@ -54,17 +57,20 @@ namespace flop::nelder_mead {
 template <ScalarObjective F>
 [[nodiscard]] Result minimize(F&& f, std::span<const double> x0, const Options& opts) {
     detail::validate_options("flop::nelder_mead::minimize", opts, x0);
+    detail::validate_nelder_mead_range("flop::nelder_mead::minimize", opts, x0);
     detail::nelder_mead::Solver<detail::ScalarEvaluator<std::remove_reference_t<F>>> solver({f}, x0,
                                                                                             opts);
     return solver.run();
 }
 
 // Batch objective f(xs, out): the initial simplex goes out as one call of
-// n + 1 points and every shrink as one call of n, each when the evaluation
-// cap allows all of them.
+// n + 1 points, every shrink as one call of the vertices it moved, every
+// rung of the ladder as one call of up to 2n points and every restart's
+// simplex as one call of n, each when the evaluation cap allows all of them.
 template <BatchObjective F>
 [[nodiscard]] Result minimize_batch(F&& f, std::span<const double> x0, const Options& opts) {
     detail::validate_options("flop::nelder_mead::minimize_batch", opts, x0);
+    detail::validate_nelder_mead_range("flop::nelder_mead::minimize_batch", opts, x0);
     detail::nelder_mead::Solver<detail::BatchEvaluator<std::remove_reference_t<F>>> solver({f}, x0,
                                                                                            opts);
     return solver.run();

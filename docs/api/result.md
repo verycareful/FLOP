@@ -42,7 +42,10 @@ struct Result {
 `evaluations` counts objective calls, batch points singly. `final_radius` is
 the scale the method had reached when it stopped, the quantity the x
 tolerances act on: COBYLA's trust radius `rho`, Nelder-Mead's simplex
-radius.
+radius. For Nelder-Mead that is the last simplex whose every vertex was
+evaluated: a run that ends inside a shrink or a restart reports the
+simplex before it, and one that ends inside its initial simplex reports
+`initial_step`.
 `max_constraint_violation` is `max(0, -min_i c_i(x))`, zero without
 constraints.
 

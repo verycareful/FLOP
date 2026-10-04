@@ -34,6 +34,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -106,7 +107,8 @@ std::vector<std::filesystem::path> corpus_files() {
 
 // Thrown by the replay objective at the first point FLOP asks for that is
 // not the next recorded one; carries how many agreed.
-struct Diverged {
+struct Diverged : std::exception {
+    explicit Diverged(std::size_t k) : agreed(k) {}
     std::size_t agreed;
 };
 
