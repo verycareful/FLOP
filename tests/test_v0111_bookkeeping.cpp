@@ -85,9 +85,11 @@ std::vector<Base> bases() {
                    .step = 0.5,
                    .bounds = std::nullopt,
                    .cap = 300});
-    // A box face holding the minimum: coordinates go flat on the bound, so a
-    // discarded vertex can hold both extremes of a coordinate.
-    const Vec lo(3, -1.0), hi(3, 0.25);
+    // A box face holding the minimum in coordinate 0 only (the sphere's
+    // centres are 0.3, 0.6, 0.9): once the face test fixes that coordinate on
+    // 0.25, every vertex holds it there, so every discarded vertex holds both
+    // extremes of a coordinate.
+    const Vec lo(3, -1.0), hi{0.25, 8.0, 8.0};
     out.push_back({.name = "sphere 3 on a face",
                    .f = v0111::sphere,
                    .x0 = Vec(3, 0.0),
@@ -176,10 +178,14 @@ TEST(V0111Bookkeeping, TheRunsDiscardExtremesInEveryWayTheExtentsDistinguish) {
         ASSERT_TRUE(v0111::audit(b.x0, o, run.trace, run.r, false, &ref, true).points_agree);
         for (const v0111::Step& s : ref.steps) {
             if (s.termination == v0111::Termination::Shrink ||
-                s.termination == v0111::Termination::Restart)
+                s.termination == v0111::Termination::Restart ||
+                s.termination == v0111::Termination::Fix)
                 continue;
-            const std::size_t n = s.before.size() - 1;
-            const v0111::Vertex& gone = s.before[n];
+            // m + 1 vertices of n coordinates; m < n once the face test has
+            // fixed a coordinate on the box.
+            const std::size_t m = s.before.size() - 1;
+            const std::size_t n = s.before[0].x.size();
+            const v0111::Vertex& gone = s.before[m];
             // The accepted point: the one vertex of the new simplex that is
             // not a vertex of the old.
             const v0111::Vertex* added = nullptr;
@@ -192,7 +198,7 @@ TEST(V0111Bookkeeping, TheRunsDiscardExtremesInEveryWayTheExtentsDistinguish) {
             for (std::size_t i = 0; i < n; ++i) {
                 double kept_lo = std::numeric_limits<double>::max();
                 double kept_hi = std::numeric_limits<double>::lowest();
-                for (std::size_t k = 0; k < n; ++k) {
+                for (std::size_t k = 0; k < m; ++k) {
                     kept_lo = std::min(kept_lo, s.before[k].x[i]);
                     kept_hi = std::max(kept_hi, s.before[k].x[i]);
                 }

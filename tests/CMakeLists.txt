@@ -92,6 +92,7 @@ set(FLOP_TEST_SOURCES
     test_v0112_ladder.cpp
     test_v0112_range.cpp
     test_v0112_tolerance.cpp
+    test_v0113_active_set.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines

@@ -7,6 +7,89 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.1.3] - 2026-11-04 00:45 IST
+
+Nelder-Mead with its minimiser on a face of the box. Measuring the method
+against NLopt for the benchmark header turned up a stall: at a minimiser on
+a face the gradient points through the bound, so the simplex keeps finding
+descent toward it, never contracts and never meets a stopping test. On a
+sphere whose minimiser lies on a face, runs with the default coefficients
+ran to their evaluation cap from 6 parameters (3 of 4 starts at 6, every
+start from 8), and with the standard ones from 10, ending up to 1.5 above
+the minimum. I fix it by reducing the problem to the free coordinates once
+a bound proves active, and the benchmark header now carries the NLopt
+numbers it was missing.
+
+### Added
+
+- The face test. Once the box has acted on a run, every iteration whose
+  stopping tests pass first polls the best vertex onto each bound within
+  the simplex's diameter of it: the best vertex with that one coordinate
+  set to the bound. If the first of least value is strictly better, that
+  coordinate is fixed on its bound and the method starts again from the
+  point on the free coordinates, with a fresh simplex of edge the radius
+  and Gao and Han's coefficients for the number of free coordinates. A
+  bound whose poll fails is polled again only once the diameter has
+  halved, and a poll point that is already a vertex is not evaluated. With
+  a batch objective the polls of one iteration are one call. Each poll is a
+  coordinate step normal to the face (Lewis and Torczon, section 3.5 and
+  Proposition 5.2), and the stall it answers is the one their section 7
+  names, an interior approach to a point on the boundary.
+- The poll ladder polls fixed coordinates too, inward only, and frees every
+  fixed coordinate whose poll in the rung that restarts the method is
+  strictly better, so a stop is still certified in the full space. With
+  every coordinate fixed the simplex is one point, and the ladder decides
+  the stop.
+- `benchmarks/bench_nelder_mead.cpp`: an active box row, the sphere with
+  its minimiser on a face, run to a stop, with a counter that flags a run
+  ending at the safety cap; and the NLopt 2.7.1 numbers on the same rows
+  and host in the header.
+
+### Changed
+
+- A fixed coordinate is copied into every trial point, never averaged
+  from the vertices, so it stays on its bound exactly: `(b + b + b) / 3`
+  need not round back to `b`.
+- `docs/algorithms/nelder-mead.md`: a deviation for a minimiser on a face,
+  the face test checked against Lewis and Torczon, the coefficients and
+  batch calls with coordinates fixed, and the limits rewritten. The API
+  page states the batch calls.
+
+### Fixed
+
+- Nelder-Mead with its minimiser on a face or a corner of the box stops on
+  its own instead of running to the cap. The sphere on a face now stops in
+  710 evaluations at 8 parameters (it ran to the cap of 16000), 1784 at
+  16 and 4568 at 32, and on the corner of 16 lower bounds a run lands on
+  the corner exactly. NLopt's Nelder-Mead takes 13285 at 8 and runs to the
+  cap at 16 and 32.
+- On Rosenbrock's function on `[-2, 0.5]^n`, runs at 8 parameters need 3
+  to 4 times fewer evaluations, and at 16, where every run reached the cap,
+  they stop on their own.
+
+### Tests
+
+- New suite `V0113ActiveSet`, 6 tests: a minimiser on a face is reached at
+  6, 8 and 16 parameters with both coefficient sets; a corner is reached on
+  its bounds to the bit; the reference transcription agrees point by point
+  through fixes and frees; a bound just below an interior minimiser is
+  fixed and freed again, with every fix undone; both channels evaluate the
+  same points; and with every coordinate fixed the run ends in the ladder's
+  rungs, derived from the initial step and the x tolerance.
+- The reference transcription in the test tree models the face test, the
+  fixed coordinates and the frees.
+- The scripted corner and face scenarios of `V0111Bounds`, `V0111Batch`
+  and `V0112Ladder` carry the face test's polls, re-derived by hand: one
+  evaluated poll on the corner, and the evaluation counts and caps after
+  it moved by one. `V0111Bookkeeping` separates the simplex's dimension
+  from the number of coordinates, and its face problem binds one
+  coordinate, since the corner it used is now solved without a nonshrink
+  step.
+
+### Results
+
+306 tests across 31 suites, all passed in both binaries, strict and -ffast-math (2.8 to 3.1 s per binary, Linux x86-64, GCC 16.2.1, and GCC 16.2.1 with the library under -ffast-math).
+
 ## [0.1.1.2] - 2026-10-04 15:19 IST
 
 The fixes the Nelder-Mead test release pinned. All six defects 0.1.1.1

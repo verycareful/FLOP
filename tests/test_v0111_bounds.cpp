@@ -88,7 +88,13 @@ flop::Bounds box(const Vec& lo, const Vec& hi) {
 // the simplex is driven onto (0, 0) in both coordinates in five steps, all
 // in exact arithmetic (every trial point is projected onto the box):
 //   (0, 1) [x_r of s1, projected; equals s2], (0, 0.75) [x_c, projected],
-//   (0, 0) [x_r, projected], (0, 0) [x_r], (0, 0) [x_c], radius 0.
+//   (1, 0) [the face test], (0, 0) [x_r, projected], (0, 0) [x_r],
+//   (0, 0) [x_c], radius 0.
+// The face test runs once the projection has acted: on the simplex (0, 0),
+// (0, 0.75), (0, 1), diameter 1, both upper bounds are within reach of x_1 =
+// (0, 0). (1, 0) is evaluated, worse; (0, 1) is a vertex and is not. Later
+// diameters are below 1, so neither upper bound is within reach again, and
+// x_1 is on both lower bounds.
 // xtol_abs = 0.5, so the ladder has two rungs, d = 1 and d = 0.5. From the
 // corner every minus point clips back onto it and is left out, so each rung
 // is (d, 0) then (0, d); the first rung's points are s1 and s2 again.
@@ -125,7 +131,7 @@ Table corner_table(double f_half0, double f_half1, double f_half01 = 4.0) {
 }
 
 std::vector<Vec> corner_path() {
-    return {c00(), c10(), c01(), c01(), c0q(), c00(), c00(), c00()};
+    return {c00(), c10(), c01(), c01(), c0q(), c10(), c00(), c00(), c00()};
 }
 
 flop::Bounds unit_box() {
@@ -507,7 +513,7 @@ TEST(V0111Bounds, TheRestartIsFromTheFirstPointOfLeastValueInTheWholeRung) {
     {
         // (0, 0.5) is the better of the two: the restart is from it, with
         // the simplex of size 0.5, (0.5, 0.5) and (0, 1).
-        const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(14));
+        const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(15));
         std::vector<Vec> want = corner_path();
         for (const Vec& p : {c10(), c01(), half0(), half1(), half01(), c01()}) want.push_back(p);
         expect_points(run.trace, want);
@@ -515,7 +521,7 @@ TEST(V0111Bounds, TheRestartIsFromTheFirstPointOfLeastValueInTheWholeRung) {
     {
         // A tie: the first, (0.5, 0), after the whole rung; its simplex is
         // (1, 0) and (0.5, 0.5).
-        const Traced run = v0111::traced(corner_table(0.5, 0.5), c00(), corner_options(14));
+        const Traced run = v0111::traced(corner_table(0.5, 0.5), c00(), corner_options(15));
         std::vector<Vec> want = corner_path();
         for (const Vec& p : {c10(), c01(), half0(), half1(), c10(), half01()}) want.push_back(p);
         expect_points(run.trace, want);
@@ -526,9 +532,9 @@ TEST(V0111Bounds, RungPointsAndRestartPointsAreEvaluationsLikeAnyOther) {
     {
         // The cap inside the second rung: MaxEvaluationsReached, and the
         // radius is the flat simplex's.
-        const Traced run = v0111::traced(corner_table(5.0, 5.0), c00(), corner_options(10));
+        const Traced run = v0111::traced(corner_table(5.0, 5.0), c00(), corner_options(11));
         EXPECT_EQ(run.r.status, flop::Status::MaxEvaluationsReached);
-        EXPECT_EQ(run.r.evaluations, 10u);
+        EXPECT_EQ(run.r.evaluations, 11u);
         EXPECT_EQ(run.r.final_radius, 0.0);
     }
     {
@@ -537,7 +543,7 @@ TEST(V0111Bounds, RungPointsAndRestartPointsAreEvaluationsLikeAnyOther) {
         o.stopping.stop_value = 0.6;
         const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), o);
         EXPECT_EQ(run.r.status, flop::Status::StopValueReached);
-        EXPECT_EQ(run.r.evaluations, 12u);
+        EXPECT_EQ(run.r.evaluations, 13u);
         EXPECT_TRUE(v0111::same_bits(run.r.x, half1()));
     }
     {
@@ -547,7 +553,7 @@ TEST(V0111Bounds, RungPointsAndRestartPointsAreEvaluationsLikeAnyOther) {
         Table t = corner_table(0.7, 0.5, 0.1);
         const Traced run = v0111::traced(t, c00(), o);
         EXPECT_EQ(run.r.status, flop::Status::StopValueReached);
-        EXPECT_EQ(run.r.evaluations, 13u);
+        EXPECT_EQ(run.r.evaluations, 14u);
         EXPECT_TRUE(v0111::same_bits(run.r.x, half01()));
     }
 }
@@ -556,7 +562,7 @@ TEST(V0111Bounds, FinalRadiusOnACapInsideARestartIsTheLastEvaluatedSimplex) {
     // The cap admits the restart's first new vertex and refuses the second.
     // The last simplex whose every vertex was evaluated is the flat one at
     // the corner, radius 0.
-    const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(13));
+    const Traced run = v0111::traced(corner_table(0.7, 0.5), c00(), corner_options(14));
     ASSERT_EQ(run.r.status, flop::Status::MaxEvaluationsReached);
     EXPECT_EQ(run.r.final_radius, 0.0);
 }

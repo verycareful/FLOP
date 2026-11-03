@@ -15,7 +15,8 @@
 // with FLOP is only what the paper leaves open and FLOP documents
 // (docs/algorithms/nelder-mead.md, "Deviations from the paper"): the initial
 // simplex, the projection onto a box, the stopping rules, the shrink that
-// moves no vertex, and the poll ladder.
+// moves no vertex, the poll ladder, and the face test with the coordinates it
+// fixes on a bound.
 //
 // Where the 0.1.1.1 suite settled what FLOP must do, the reference does
 // that, and a test that compares FLOP with it on such a path is red until
@@ -64,14 +65,19 @@
 namespace v0111 {
 
 // The step of Algorithm NM in which an iteration terminated (section 2.1),
-// or a restart from the poll ladder.
+// a restart from the poll ladder, or a restart from the face test with a
+// coordinate fixed on a bound.
 enum class Termination : std::uint8_t {
     Reflect = 2,
     Expand = 3,
     Contract = 4,
     Shrink = 5,
-    Restart = 6
+    Restart = 6,
+    Fix = 7
 };
+
+// Where a coordinate is: free, or fixed on one of its bounds.
+enum class Side : std::uint8_t { Free, Lower, Upper };
 
 struct Vertex {
     std::vector<double> x;
@@ -97,6 +103,8 @@ struct ReferenceRun {
     std::size_t shrinks = 0;
     std::size_t still_shrinks = 0;  // shrinks that moved no vertex, each a stop verdict
     std::size_t restarts = 0;
+    std::size_t fixes = 0;  // coordinates the face test fixed on a bound
+    std::size_t frees = 0;  // fixed coordinates the ladder freed
 };
 
 class Reference {
@@ -107,7 +115,11 @@ public:
           n_(x0.size()),
           opts_(opts),
           coef_(documented(x0.size(), opts.adaptive_coefficients)),
-          record_(record) {}
+          record_(record),
+          side_(x0.size(), Side::Free),
+          failed_lower_(x0.size()),
+          failed_upper_(x0.size()),
+          m_(x0.size()) {}
 
     template <class Oracle>
     ReferenceRun run(Oracle& oracle) {
@@ -117,6 +129,8 @@ public:
         have_best_ = false;
         complete_radius_.reset();
         box_acted_ = false;
+        std::ranges::fill(side_, Side::Free);
+        set_free();
         status_ = flop::Status::RoundoffLimited;
         if (build(oracle, x0_, std::nullopt, opts_.initial_step)) {
             while (!ended_) {
@@ -198,16 +212,20 @@ private:
         return *hi - base[i] >= base[i] - *lo ? *hi : *lo;
     }
 
-    // The initial simplex, or a restart's: base and the n displaced points
-    // at step h, evaluated base first (unless known) and then in coordinate
-    // order, and ordered stably, so ties keep construction order.
+    // The initial simplex, or a restart's: base and the m displaced points
+    // at step h, one along each free coordinate, evaluated base first (unless
+    // known) and then in coordinate order, and ordered stably, so ties keep
+    // construction order. Every face test record is cleared.
     template <class Oracle>
     bool build(Oracle& oracle, const std::vector<double>& base, std::optional<double> base_f,
                double h) {
+        std::ranges::fill(failed_lower_, std::nullopt);
+        std::ranges::fill(failed_upper_, std::nullopt);
         Ordered fresh;
         fresh.push_back({.x = base, .f = base_f.value_or(0.0)});
         if (!base_f && !evaluate(oracle, fresh[0].x, fresh[0].f)) return false;
         for (std::size_t i = 0; i < n_; ++i) {
+            if (side_[i] != Side::Free) continue;
             Vertex v{.x = base, .f = 0.0};
             v.x[i] = offset_vertex(base, i, h);
             if (v.x[i] != base[i] + h) box_acted_ = true;
@@ -225,6 +243,26 @@ private:
             for (std::size_t i = 0; i < n_; ++i)
                 r = std::max(r, std::fabs(v.x[i] - simplex_[0].x[i]));
         return r;
+    }
+
+    // The largest coordinate range over the vertices.
+    [[nodiscard]] double diameter() const {
+        double d = 0.0;
+        for (std::size_t i = 0; i < n_; ++i) {
+            double lo = simplex_[0].x[i], hi = lo;
+            for (const Vertex& v : simplex_) {
+                lo = std::min(lo, v.x[i]);
+                hi = std::max(hi, v.x[i]);
+            }
+            d = std::max(d, hi - lo);
+        }
+        return d;
+    }
+
+    // The free coordinates changed: their count and the coefficients for it.
+    void set_free() {
+        m_ = static_cast<std::size_t>(std::ranges::count(side_, Side::Free));
+        coef_ = documented(m_, opts_.adaptive_coefficients);
     }
 
     [[nodiscard]] double precision_floor() const {
@@ -285,14 +323,18 @@ private:
     // the points x_1 +- d e_i clipped to the box, coordinate by coordinate
     // and + before -, a point clipped back onto x_1 left out; the whole rung
     // is evaluated, and the first point of least value restarts the method
-    // with a fresh simplex of size d when it is strictly below f(x_1). True
-    // when the run restarted or ended here.
+    // with a fresh simplex of size d when it is strictly below f(x_1). Every
+    // coordinate is polled, fixed ones too, whose outward point clips back
+    // onto x_1; in the rung that restarts, each fixed coordinate whose point
+    // is strictly below f(x_1) is freed. True when the run restarted or ended
+    // here.
     template <class Oracle>
     bool ladder(Oracle& oracle, const flop::Bounds& bounds, double bottom) {
         const Vertex best = simplex_.front();
         double d = opts_.initial_step;
         while (d >= bottom) {
             std::vector<Vertex> rung;
+            std::vector<std::size_t> coord;
             for (std::size_t i = 0; i < n_; ++i) {
                 for (const double sign : {1.0, -1.0}) {
                     Vertex p = best;
@@ -303,6 +345,7 @@ private:
                         p.x[i] = *bound;
                     if (p.x[i] == best.x[i]) continue;
                     rung.push_back(std::move(p));
+                    coord.push_back(i);
                 }
             }
             if (!rung.empty()) {
@@ -314,6 +357,12 @@ private:
                     if (rung[j].f < best.f && (!arg || rung[j].f < rung[*arg].f)) arg = j;
                 if (arg) {
                     const Ordered before = simplex_;
+                    for (std::size_t j = 0; j < rung.size(); ++j) {
+                        if (side_[coord[j]] == Side::Free || !(rung[j].f < best.f)) continue;
+                        side_[coord[j]] = Side::Free;
+                        ++run_.frees;
+                    }
+                    set_free();
                     if (!build(oracle, rung[*arg].x, rung[*arg].f, d)) return true;
                     ++run_.restarts;
                     note(Termination::Restart, 0.0, before, first);
@@ -323,6 +372,68 @@ private:
             d *= 0.5;
         }
         return false;
+    }
+
+    // ============================================================ face test
+    // Once the box has acted, at the top of an iteration whose stopping tests
+    // passed: each free coordinate i and bound b, upper before lower, with
+    // x_1,i != b within the diameter D of x_1 (b <= x_1,i + D, or b >=
+    // x_1,i - D) and no failed test of (i, b) at a diameter less than twice
+    // D. The candidate is x_1 with coordinate i set to b; one that is already
+    // a vertex is not evaluated and fails, its value known and no lower than
+    // f(x_1). All other candidates are evaluated; the first of least value strictly below f(x_1)
+    // fixes its coordinate on b and restarts from it with a fresh simplex on the free coordinates,
+    // of size the radius. Otherwise every candidate records D. True when the run restarted or ended
+    // here.
+    template <class Oracle>
+    bool face_test(Oracle& oracle, const Ordered& before, std::size_t first) {
+        if (!box_acted_ || !opts_.bounds) return false;
+        const flop::Bounds& bounds = *opts_.bounds;
+        const double dmax = diameter();
+        const Vertex& x1 = simplex_.front();
+        std::vector<Vertex> cand;
+        std::vector<std::size_t> coord;
+        std::vector<Side> side;
+        for (std::size_t i = 0; i < n_; ++i) {
+            if (side_[i] != Side::Free) continue;
+            for (const Side s : {Side::Upper, Side::Lower}) {
+                const std::optional<double>& b =
+                    s == Side::Upper ? bounds.upper[i] : bounds.lower[i];
+                if (!b.has_value() || x1.x[i] == *b) continue;
+                if (s == Side::Upper ? !(*b <= x1.x[i] + dmax) : !(*b >= x1.x[i] - dmax)) continue;
+                const std::optional<double>& rec =
+                    s == Side::Upper ? failed_upper_[i] : failed_lower_[i];
+                if (rec.has_value() && dmax > 0.5 * *rec) continue;
+                Vertex p = x1;
+                p.x[i] = *b;
+                if (std::ranges::any_of(simplex_, [&](const Vertex& v) { return v.x == p.x; })) {
+                    (s == Side::Upper ? failed_upper_ : failed_lower_)[i] = dmax;
+                    continue;
+                }
+                cand.push_back(std::move(p));
+                coord.push_back(i);
+                side.push_back(s);
+            }
+        }
+        if (cand.empty()) return false;
+        for (Vertex& p : cand)
+            if (!evaluate(oracle, p.x, p.f)) return true;
+        std::optional<std::size_t> arg;
+        for (std::size_t j = 0; j < cand.size(); ++j)
+            if (cand[j].f < x1.f && (!arg || cand[j].f < cand[*arg].f)) arg = j;
+        if (!arg) {
+            for (std::size_t j = 0; j < cand.size(); ++j)
+                (side[j] == Side::Upper ? failed_upper_ : failed_lower_)[coord[j]] = dmax;
+            return false;
+        }
+        const double r = radius();
+        side_[coord[*arg]] = side[*arg];
+        ++run_.fixes;
+        set_free();
+        const Vertex p = cand[*arg];
+        if (!build(oracle, p.x, p.f, r)) return true;
+        note(Termination::Fix, 0.0, before, first);
+        return true;
     }
 
     // ============================================================ iteration
@@ -342,27 +453,34 @@ private:
         }
     }
 
-    // (2.12), summed from scratch: xbar = sum_{i <= n} x_i / n.
+    // (2.12), summed from scratch over the m + 1 vertices: xbar = sum_{i <=
+    // m} x_i / m. A fixed coordinate is the bound every vertex holds, copied.
     [[nodiscard]] std::vector<double> z(double tau) {
         std::vector<double> out(n_);
         for (std::size_t i = 0; i < n_; ++i) {
+            if (side_[i] != Side::Free) {
+                out[i] = simplex_[0].x[i];
+                continue;
+            }
             double s = 0.0;
-            for (std::size_t k = 0; k < n_; ++k) s += simplex_[k].x[i];
-            const double xbar = s / static_cast<double>(n_);
-            out[i] = xbar + tau * (xbar - simplex_[n_].x[i]);
+            for (std::size_t k = 0; k < m_; ++k) s += simplex_[k].x[i];
+            const double xbar = s / static_cast<double>(m_);
+            out[i] = xbar + tau * (xbar - simplex_[m_].x[i]);
         }
         project(out);
         return out;
     }
 
-    // Steps 2 to 5 of Algorithm NM, as printed.
+    // The face test, then steps 2 to 5 of Algorithm NM, as printed, on the
+    // m + 1 vertices.
     template <class Oracle>
     void iterate(Oracle& oracle) {
         const Ordered before = simplex_;
         const std::size_t first = evals_;
+        if (face_test(oracle, before, first)) return;
         const double f1 = simplex_[0].f;
-        const double fn = simplex_[n_ - 1].f;
-        const double fn1 = simplex_[n_].f;
+        const double fn = simplex_[m_ - 1].f;
+        const double fn1 = simplex_[m_].f;
         const double rho = coef_.rho, chi = coef_.chi, gamma = coef_.gamma;
 
         // 2. Reflect.
@@ -408,14 +526,14 @@ private:
     // is discarded and v takes position j + 1 for the smallest l = j with
     // f(v) < f(x_{l+1}); every other vertex keeps its relative order.
     void accept(Vertex v, Termination t, double tau, const Ordered& before, std::size_t first) {
-        std::size_t j = n_;
-        for (std::size_t l = 0; l <= n_; ++l) {
+        std::size_t j = m_;
+        for (std::size_t l = 0; l <= m_; ++l) {
             if (v.f < before[l].f) {
                 j = l;
                 break;
             }
         }
-        Ordered next(before.begin(), before.begin() + static_cast<std::ptrdiff_t>(n_));
+        Ordered next(before.begin(), before.begin() + static_cast<std::ptrdiff_t>(m_));
         next.insert(next.begin() + static_cast<std::ptrdiff_t>(j), std::move(v));
         simplex_ = std::move(next);
         note(t, tau, before, first);
@@ -434,7 +552,7 @@ private:
     void shrink(Oracle& oracle, const Ordered& before, std::size_t first) {
         Ordered fresh;
         std::vector<bool> moved;
-        for (std::size_t k = 1; k <= n_; ++k) {
+        for (std::size_t k = 1; k <= m_; ++k) {
             Vertex v{.x = std::vector<double>(n_), .f = before[k].f};
             bool changed = false;
             for (std::size_t i = 0; i < n_; ++i) {
@@ -450,7 +568,7 @@ private:
             conclude(oracle, flop::Status::RoundoffLimited, radius());
             return;
         }
-        for (std::size_t k = 0; k < n_; ++k)
+        for (std::size_t k = 0; k < m_; ++k)
             if (moved[k] && !evaluate(oracle, fresh[k].x, fresh[k].f)) return;
         std::ranges::stable_sort(fresh, [](const Vertex& a, const Vertex& b) { return a.f < b.f; });
         const auto ahead =
@@ -476,6 +594,12 @@ private:
     const flop::nelder_mead::Options& opts_;
     Coefficients coef_;
     bool record_;
+
+    std::vector<Side> side_;
+    // Per coordinate, the diameter at the last failed face test of its lower
+    // and of its upper bound since the last simplex was built.
+    std::vector<std::optional<double>> failed_lower_, failed_upper_;
+    std::size_t m_;  // the free coordinates; the simplex has m + 1 vertices
 
     Ordered simplex_;
     bool box_acted_ = false;

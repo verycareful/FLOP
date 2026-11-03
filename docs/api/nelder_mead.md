@@ -35,8 +35,9 @@ Result minimize_batch(F&& f, std::span<const double> x0, const Options& opts);
 `f` is called with a point and returns its objective value. The batch form
 uses `f(xs, out)` for the initial simplex, `n + 1` independent points with
 `x0` first; for every shrink, the vertices it moved; for every rung of the
-poll ladder on a box, up to `2n` points; and for every restart's simplex,
-`n` points. Every other evaluation is one point at a time. When a point inside
+poll ladder on a box and for every face test, up to `2n` points; and for
+every restart's simplex, one point per free coordinate (`n` until the face
+test fixes one on the box). Every other evaluation is one point at a time. When a point inside
 such a call meets `stop_value`, every point of the call has been evaluated
 and counts. The method takes no nonlinear constraints, and there is no
 overload for them.

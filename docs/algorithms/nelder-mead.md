@@ -91,6 +91,30 @@ when the vertex that held its extreme is the one discarded. A shrink costs
   with the step halved after every failed poll; here they certify a stop
   rather than drive the search. A box that never binds leaves the run
   exactly the unbounded one.
+- **A minimiser on a face.** The gradient at a minimiser on a face points
+  through the bound, so the simplex keeps finding descent toward it: it
+  never contracts, never meets a stopping test, and approaches the face
+  from the interior without landing on it, so the ladder, which runs only
+  before a stop, never runs. On a sphere whose minimiser lies on a face this
+  happens from `n = 6` with Gao and Han's coefficients and from `n = 10`
+  with the standard ones. So once the box has acted, every iteration whose
+  stopping tests pass starts with a face test. For each free coordinate `i`
+  and each bound `b` it has, upper before lower, with `x_1,i != b` and `b`
+  within the simplex's diameter `D` of `x_1` (`b <= x_1,i + D`, or
+  `b >= x_1,i - D`), the candidate is `x_1` with coordinate `i` set to `b`.
+  A bound whose test failed is tested again only once the diameter has
+  halved, and a candidate that is already a vertex is not evaluated, its
+  value being known and no lower than `f(x_1)`. The candidates are
+  evaluated whole. If the first of least value is strictly below `f(x_1)`,
+  coordinate `i` is fixed on `b`, and the method starts again from that
+  point with a fresh simplex of edge the radius on the free coordinates.
+  With `m` coordinates free the simplex has `m + 1` vertices, every one of
+  them holding each fixed coordinate at its bound, and the coefficients are
+  Gao and Han's for `m`. The ladder polls every coordinate, fixed ones
+  included, and in the rung that restarts the method frees every fixed
+  coordinate whose point there is strictly below `f(x_1)`, so a stop is
+  still certified in the full space. With every coordinate fixed the
+  simplex is one point, and the ladder decides the stop.
 - **The initial simplex.** Lagarias et al. leave the initial simplex to the
   user. FLOP uses `x0` and, for each coordinate `i`, the point
   `x0 + initial_step * e_i` when it is inside the box, else
@@ -120,11 +144,13 @@ when the vertex that held its extreme is the one discarded. A shrink costs
   division rather than a product that could overflow.
 - **One dimension.** Gao and Han's coefficients are stated for `n >= 2`;
   at `n = 1` their shrink coefficient would be zero. FLOP uses the standard
-  coefficients at `n = 1` whatever the option says.
+  coefficients at `n = 1` whatever the option says, and likewise once the
+  face test leaves one coordinate free.
 - **Batch evaluation.** With a `BatchObjective`, the initial simplex goes
   out as one call of `n + 1` points with `x0` first, every shrink as one
-  call of the vertices it moved, every rung of the ladder as one call of up
-  to `2n`, and the fresh simplex of a restart as one call of `n`. Every
+  call of the vertices it moved, every rung of the ladder and every face
+  test as one call of up to `2n`, and the fresh simplex of a restart as one
+  call of `m`. Every
   other evaluation depends on the one before it and goes out alone. A cap too small for the whole batch sends the points one at a
   time, up to the cap. Both channels evaluate the same points in the same
   order, with one exception: when a point inside a batch call meets
@@ -246,6 +272,18 @@ the step going to zero; a ladder stops at a finite scale, so it certifies
 a stop at that scale and no more. The ladder is tested against this rule
 and against a slow transcription of it.
 
+The face test answers a gap Lewis and Torczon name in their section 7:
+identifying the active constraints, and the risk of "a purely interior
+approach to a point on the boundary", which is the stall described under
+deviations. Each candidate is a coordinate poll normal to the face, the
+direction their section 3.5 and Proposition 5.2 rely on (`x_1 - d e_i`
+clipped to the box, for any `d` at least the distance to the bound), and a
+failed bound waits for the diameter to halve, their `theta = 1/2`. Fixing
+a coordinate and continuing on the free ones is FLOP's own; their paper
+proves nothing about it. What keeps a stop honest is the ladder, which
+still polls every coordinate in the full space. The face test is tested
+against this rule and against the same slow transcription.
+
 ## Limits
 
 - The method has no convergence guarantee. Lagarias et al. prove convergence
@@ -255,11 +293,16 @@ and against a slow transcription of it.
   9(1), 1998, pp. 148-158, constructs a strictly convex function in two
   dimensions on which the method converges to a point that is not a
   minimiser. FLOP does not restart on convergence except through the ladder
-  on a box the run has touched, as described above.
-- The ladder runs only before a stop. A simplex flattened against a face
-  whose values differ only by rounding can keep reflecting without ever
-  meeting a stopping test; such a run ends at the cap with
+  and the face test on a box the run has touched, as described above.
+- The face test polls a bound only while `x_1` is off it. A simplex
+  flattened onto a face that `x_1` already lies on, whose values differ only
+  by rounding, can keep reflecting without meeting a stopping test, and the
+  ladder runs only before a stop; such a run ends at the cap with
   `MaxEvaluationsReached`, never with a converged status.
+- The face test costs evaluations near a bound that does not hold the
+  minimiser: a coordinate it fixes there waits for the ladder to free it.
+  On a sphere whose minimiser is just inside a face, runs cost up to a
+  tenth more than they would without the test.
 - The ladder costs evaluations: up to `2n` per rung, and about
   `log2(initial_step / scale)` rungs before a stop stands, where `scale` is
   the stop's scale above.

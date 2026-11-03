@@ -623,6 +623,7 @@ TEST(V0111Paper, TheChangeIndexIsWherePage117SaysItIs) {
                     ++per_step[3];
                     break;
                 case Termination::Restart:
+                case Termination::Fix:
                     break;
             }
         }
@@ -684,6 +685,7 @@ TEST(V0111Paper, AnIterationCostsWhatSection3_1Says) {
                     EXPECT_EQ(s.evaluations, n + 2);
                     break;
                 case Termination::Restart:
+                case Termination::Fix:
                     break;
             }
         }

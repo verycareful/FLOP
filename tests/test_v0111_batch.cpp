@@ -139,18 +139,20 @@ TEST(V0111Batch, EveryShrinkIsOneCallOfNAndEveryOtherPointGoesAlone) {
 
 TEST(V0111Batch, EachRungIsOneCallAndARestartOneCallOfN) {
     // The corner scenario of the bounds suite: five single steps onto the
-    // corner, the ladder's two rungs of two points each, the second holding
-    // the better (0, 0.5), then the restart's two new vertices in one call.
+    // corner with the face test's one evaluated candidate after the second,
+    // a call of one, the ladder's two rungs of two points each, the second
+    // holding the better (0, 0.5), then the restart's two new vertices in one
+    // call.
     Table t;
     t.set({0.0, 0.0}, 1.0).set({1.0, 0.0}, 3.0).set({0.0, 1.0}, 2.0).set({0.0, 0.75}, 1.5);
     t.set({0.5, 0.0}, 0.7).set({0.0, 0.5}, 0.5).set({0.5, 0.5}, 4.0);
     auto f = v0111::batched([&t](std::span<const double> x) { return t(x); });
-    flop::nelder_mead::Options o = v0111::options(1.0, 14);
+    flop::nelder_mead::Options o = v0111::options(1.0, 15);
     o.bounds = flop::Bounds::box(Vec{0.0, 0.0}, Vec{1.0, 1.0});
     o.stopping.xtol_abs = 0.5;
     const Traced run = v0111::traced_batch(f, Vec{0.0, 0.0}, o);
-    EXPECT_EQ(f.sizes, (std::vector<std::size_t>{3, 1, 1, 1, 1, 1, 2, 2, 2}));
-    EXPECT_EQ(run.r.evaluations, 14u);
+    EXPECT_EQ(f.sizes, (std::vector<std::size_t>{3, 1, 1, 1, 1, 1, 1, 2, 2, 2}));
+    EXPECT_EQ(run.r.evaluations, 15u);
     EXPECT_EQ(t.misses(), 0u);
 }
 

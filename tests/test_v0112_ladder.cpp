@@ -41,8 +41,9 @@ void expect_points(const v0111::Trace& t, const std::vector<Vec>& want) {
 }
 
 // The corner scenario of the bounds suite: n = 2 on [0, 1]^2 from (0, 0)
-// with h = 1, driven onto the corner in five projected steps; a ladder rung
-// at d is then (d, 0), (0, d). Every rung point not listed is worse.
+// with h = 1, driven onto the corner in five projected steps, with the face
+// test's one evaluated candidate, (1, 0), after the second; a ladder rung at
+// d is then (d, 0), (0, d). Every rung point not listed is worse.
 Table corner_table() {
     Table t;
     t.set({0.0, 0.0}, 1.0).set({1.0, 0.0}, 3.0).set({0.0, 1.0}, 2.0).set({0.0, 0.75}, 1.5);
@@ -51,8 +52,8 @@ Table corner_table() {
 }
 
 std::vector<Vec> corner_path() {
-    return {{0.0, 0.0},  {1.0, 0.0}, {0.0, 1.0}, {0.0, 1.0},
-            {0.0, 0.75}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
+    return {{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}, {0.0, 1.0}, {0.0, 0.75},
+            {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
 }
 
 flop::nelder_mead::Options corner_options() {
@@ -70,14 +71,17 @@ TEST(V0112Ladder, AnInitialVertexMovedByTheBoxIsEnoughForTheLadder) {
     // is worse than both, the inside contraction 0.75, at 0.75, better than
     // the worst: the simplex {0.5, 0.75}, radius 0.25 = xtol_abs, stops.
     // The ladder then polls 0.5 +- 0.5 (1 and 0) and 0.5 +- 0.25 (0.75 and
-    // 0.25), all worse, and the stop stands.
+    // 0.25), all worse, and the stop stands. Before the first step the face
+    // test, the box having acted, finds both bounds within the diameter 0.5
+    // of x_1 = 0.5: 1 is a vertex and is not evaluated, 0 is, and is worse.
+    // On {0.5, 0.75} neither bound is within the diameter 0.25.
     Table t;
     t.set({1.0}, 1.0).set({0.5}, 0.5).set({0.0}, 2.0).set({0.75}, 0.75).set({0.25}, 5.0);
     flop::nelder_mead::Options o = v0111::options(0.5, 100);
     o.bounds = flop::Bounds::box(Vec{0.0}, Vec{1.0});
     o.stopping.xtol_abs = 0.25;
     const Traced run = v0111::traced(t, Vec{1.0}, o);
-    expect_points(run.trace, {{1.0}, {0.5}, {0.0}, {0.75}, {1.0}, {0.0}, {0.75}, {0.25}});
+    expect_points(run.trace, {{1.0}, {0.5}, {0.0}, {0.0}, {0.75}, {1.0}, {0.0}, {0.75}, {0.25}});
     EXPECT_EQ(run.r.status, flop::Status::XtolReached);
     EXPECT_TRUE(v0111::same_bits(run.r.x, Vec{0.5}));
     EXPECT_EQ(t.misses(), 0u);
