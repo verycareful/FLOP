@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "flop/bobyqa.hpp"
 #include "flop/cobyla.hpp"
 #include "flop/nelder_mead.hpp"
 
@@ -28,16 +29,24 @@ namespace flop {
 
 namespace {
 
-constexpr std::array<std::string_view, 2> kNames = {"COBYLA", "NELDER_MEAD"};
+constexpr std::array<std::string_view, 3> kNames = {"BOBYQA", "COBYLA", "NELDER_MEAD"};
 
 [[noreturn]] void no_such_option(std::string_view algorithm, const char* setter) {
     throw std::invalid_argument(std::string("flop::Minimizer::") + setter + ": " +
                                 std::string(algorithm) + " has no such option");
 }
 
+// Refuses nonlinear constraints, before any evaluation.
+void refuse_constraints(const Minimizer::Constraints* c, std::string_view algorithm) {
+    if (c)
+        throw std::invalid_argument("flop::Minimizer::minimize: " + std::string(algorithm) +
+                                    " does not take nonlinear constraints");
+}
+
 }  // namespace
 
 struct Minimizer::Impl {
+    struct Bobyqa;
     struct Cobyla;
     struct NelderMead;
     virtual ~Impl() = default;
@@ -48,6 +57,13 @@ struct Minimizer::Impl {
     virtual void set_adaptive_coefficients(bool) {
         no_such_option(name(), "set_adaptive_coefficients");
     }
+    virtual void set_interpolation_points(std::size_t) {
+        no_such_option(name(), "set_interpolation_points");
+    }
+    virtual void set_shrink_initial_step(bool) {
+        no_such_option(name(), "set_shrink_initial_step");
+    }
+    virtual void set_newuoa_weight(bool) { no_such_option(name(), "set_newuoa_weight"); }
     virtual Result run(const Objective& f, const Constraints* c, std::size_t m,
                        std::span<const double> x0, const Options& opts) const = 0;
     virtual Result run(const BatchObjective& f, const Constraints* c, std::size_t m,
@@ -56,6 +72,41 @@ struct Minimizer::Impl {
 
 // Impl is private to Minimizer, so the algorithm implementations are declared
 // as nested types of it rather than in an anonymous namespace.
+struct Minimizer::Impl::Bobyqa final : Minimizer::Impl {
+    double rhoend = 0.0;
+    std::size_t points = 0;
+    bool shrink = false;
+    bool newuoa = true;
+
+    [[nodiscard]] std::string_view name() const noexcept override { return "BOBYQA"; }
+    void set_final_trust_radius(double r) override { rhoend = r; }
+    void set_interpolation_points(std::size_t m) override { points = m; }
+    void set_shrink_initial_step(bool s) override { shrink = s; }
+    void set_newuoa_weight(bool w) override { newuoa = w; }
+
+    [[nodiscard]] bobyqa::Options make(const Options& shared) const {
+        bobyqa::Options o;
+        static_cast<Options&>(o) = shared;
+        o.final_trust_radius = rhoend;
+        o.interpolation_points = points;
+        o.shrink_initial_step = shrink;
+        o.newuoa_weight = newuoa;
+        return o;
+    }
+
+    Result run(const Minimizer::Objective& f, const Minimizer::Constraints* c, std::size_t,
+               std::span<const double> x0, const Options& opts) const override {
+        refuse_constraints(c, name());
+        return bobyqa::minimize(f, x0, make(opts));
+    }
+
+    Result run(const Minimizer::BatchObjective& f, const Minimizer::Constraints* c, std::size_t,
+               std::span<const double> x0, const Options& opts) const override {
+        refuse_constraints(c, name());
+        return bobyqa::minimize_batch(f, x0, make(opts));
+    }
+};
+
 struct Minimizer::Impl::Cobyla final : Minimizer::Impl {
     double rhoend = 0.0;
 
@@ -99,26 +150,21 @@ struct Minimizer::Impl::NelderMead final : Minimizer::Impl {
         return o;
     }
 
-    static void refuse_constraints(const Minimizer::Constraints* c) {
-        if (c)
-            throw std::invalid_argument(
-                "flop::Minimizer::minimize: NELDER_MEAD does not take nonlinear constraints");
-    }
-
     Result run(const Minimizer::Objective& f, const Minimizer::Constraints* c, std::size_t,
                std::span<const double> x0, const Options& opts) const override {
-        refuse_constraints(c);
+        refuse_constraints(c, name());
         return nelder_mead::minimize(f, x0, make(opts));
     }
 
     Result run(const Minimizer::BatchObjective& f, const Minimizer::Constraints* c, std::size_t,
                std::span<const double> x0, const Options& opts) const override {
-        refuse_constraints(c);
+        refuse_constraints(c, name());
         return nelder_mead::minimize_batch(f, x0, make(opts));
     }
 };
 
 Minimizer Minimizer::create(std::string_view name) {
+    if (name == "BOBYQA") return Minimizer(std::make_unique<Impl::Bobyqa>());
     if (name == "COBYLA") return Minimizer(std::make_unique<Impl::Cobyla>());
     if (name == "NELDER_MEAD") return Minimizer(std::make_unique<Impl::NelderMead>());
     std::string known;
@@ -145,6 +191,21 @@ Minimizer& Minimizer::set_final_trust_radius(double rhoend) {
 
 Minimizer& Minimizer::set_adaptive_coefficients(bool adaptive) {
     impl_->set_adaptive_coefficients(adaptive);
+    return *this;
+}
+
+Minimizer& Minimizer::set_interpolation_points(std::size_t m) {
+    impl_->set_interpolation_points(m);
+    return *this;
+}
+
+Minimizer& Minimizer::set_shrink_initial_step(bool shrink) {
+    impl_->set_shrink_initial_step(shrink);
+    return *this;
+}
+
+Minimizer& Minimizer::set_newuoa_weight(bool newuoa) {
+    impl_->set_newuoa_weight(newuoa);
     return *this;
 }
 

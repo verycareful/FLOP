@@ -10,7 +10,7 @@ cmake_minimum_required(VERSION 3.25)
 # The version here is the single source of truth. The label below, the
 # README badge and CITATION.cff carry the same string; nothing else does.
 project(FLOP VERSION 0.1.1.3 DESCRIPTION "Fast Library of Optimization Procedures" LANGUAGES CXX)
-set(FLOP_VERSION_LABEL "0.1.1.3.0")
+set(FLOP_VERSION_LABEL "0.1.1.3.1")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
