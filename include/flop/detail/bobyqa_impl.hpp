@@ -42,6 +42,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #ifdef FLOP_BOBYQA_TRACE
@@ -164,11 +165,27 @@ public:
         rhoend_ = std::max(rhoend_, floor_);
         if (rhoend_ > rho_) rhoend_ = rho_;
 
-        xbase_.assign(x0.begin(), x0.end());
+        const std::size_t nz = m_ - n_ - 1;
+        // Every scratch vector of the solver is cut from one buffer, laid
+        // out in the order of this table.
+        const std::pair<std::span<double>*, std::size_t> parts[] = {
+            {&vlag_, m_ + n_}, {&wv_, m_},        {&zw_, nz},        {&dvec_, n_},
+            {&sum_, n_},       {&hcol_, m_ + n_}, {&ucol_, m_ + n_}, {&gamma_, n_ * m_},
+            {&cmat_, m_ * n_}, {&work_, n_},      {&work2_, n_},     {&d_, n_},
+            {&c_, n_},         {&gd_, n_},        {&xnew_, n_},      {&x_, n_},
+            {&lam_, m_},       {&shift_, n_},     {&xold_, n_},      {&hdiag_, m_},
+            {&xbase_, n_},     {&abs_lo_, n_},    {&abs_hi_, n_}};
+        std::size_t total = 0;
+        for (const auto& part : parts) total += part.second;
+        scratch_.assign(total, 0.0);
+        std::size_t at = 0;
+        for (const auto& [span, size] : parts) {
+            *span = std::span<double>(scratch_.data() + at, size);
+            at += size;
+        }
+        std::copy(x0.begin(), x0.end(), xbase_.begin());
         // The bounds as plain values beside the box's flags: the box itself
         // holds them as offsets from the origin, which moves.
-        abs_lo_.assign(n_, 0.0);
-        abs_hi_.assign(n_, 0.0);
         if (bounds_) {
             for (std::size_t i = 0; i < n_; ++i) {
                 const std::optional<double>& lo = bounds_->lower[i];
@@ -183,39 +200,6 @@ public:
                 }
             }
         }
-        const std::size_t nz = m_ - n_ - 1;
-        // Every scratch vector of the solver is cut from one buffer.
-        const std::size_t sizes[] = {m_ + n_, m_,      nz, n_, n_, m_ + n_, m_ + n_,
-                                     n_ * m_, m_ * n_, n_, n_, n_, n_,      n_,
-                                     n_,      n_,      m_, n_, n_};
-        std::size_t total = 0;
-        for (const std::size_t k : sizes) total += k;
-        scratch_.assign(total, 0.0);
-        std::size_t at = 0;
-        const auto carve = [&](std::size_t k) {
-            const std::span<double> v(scratch_.data() + at, k);
-            at += k;
-            return v;
-        };
-        vlag_ = carve(m_ + n_);
-        wv_ = carve(m_);
-        zw_ = carve(nz);
-        dvec_ = carve(n_);
-        sum_ = carve(n_);
-        hcol_ = carve(m_ + n_);
-        ucol_ = carve(m_ + n_);
-        gamma_ = carve(n_ * m_);
-        cmat_ = carve(m_ * n_);
-        work_ = carve(n_);
-        work2_ = carve(n_);
-        d_ = carve(n_);
-        c_ = carve(n_);
-        gd_ = carve(n_);
-        xnew_ = carve(n_);
-        x_ = carve(n_);
-        lam_ = carve(m_);
-        shift_ = carve(n_);
-        xold_ = carve(n_);
         sides_.assign(2 * n_, Side::Free);
         side_ = std::span<Side>(sides_.data(), n_);
         cside_ = std::span<Side>(sides_.data() + n_, n_);
@@ -365,8 +349,7 @@ private:
             if (box_.has_hi[i]) box_.hi[i] = abs_hi_[i] - xbase_[i];
         }
         // (2.2): alpha_i and beta_i for each coordinate.
-        std::vector<double> alpha(n_), beta(n_);
-        std::vector<char> interior(n_, 0);
+        const std::span<double> alpha = work_, beta = work2_;
         for (std::size_t i = 0; i < n_; ++i) {
             if (box_.has_lo[i] && box_.lo[i] >= 0.0) {
                 alpha[i] = rhobeg_;
@@ -379,10 +362,9 @@ private:
             } else {
                 alpha[i] = rhobeg_;
                 beta[i] = -rhobeg_;
-                interior[i] = 1;
             }
         }
-        std::vector<double>& pts = model_.points;
+        const std::span<double> pts = model_.points;
         for (std::size_t i = 0; i < n_; ++i) {
             pts[(i + 1) * n_ + i] = alpha[i];
             if (n_ + i + 1 < m_) pts[(n_ + i + 1) * n_ + i] = beta[i];
@@ -393,7 +375,8 @@ private:
             // The bias towards lower values: swap the pair where the second
             // point is the lower one, on interior coordinates.
             for (std::size_t i = 0; i < n_; ++i) {
-                if (!interior[i] || !(model_.fval[n_ + i + 1] < model_.fval[i + 1])) continue;
+                const bool interior = beta[i] == -alpha[i];
+                if (!interior || !(model_.fval[n_ + i + 1] < model_.fval[i + 1])) continue;
                 std::swap(model_.fval[n_ + i + 1], model_.fval[i + 1]);
                 std::swap(pts[(n_ + i + 1) * n_ + i], pts[(i + 1) * n_ + i]);
                 std::swap(alpha[i], beta[i]);
@@ -409,7 +392,7 @@ private:
         // points, off-diagonal pairs from the extra points, the rest zero.
         const double f0 = model_.fval[0];
         const std::size_t both = std::min(n_, m_ - n_ - 1);
-        std::vector<double>& hq = model_.hq;
+        const std::span<double> hq = model_.hq;
         for (std::size_t i = 0; i < n_; ++i) {
             const double a = alpha[i];
             const double fa = (model_.fval[i + 1] - f0) / a;
@@ -457,7 +440,8 @@ private:
     }
 
     // (6.1): the t != kopt maximising w_t sigma_t, sigma_t = H_tt beta +
-    // vlag_t^2, w_t from Options::newuoa_weight around centre.
+    // vlag_t^2, w_t from Options::newuoa_weight around centre. hdiag_ holds
+    // the H_tt of the current H (fill_hdiag).
     [[nodiscard]] std::size_t select_t(std::span<const double> centre, double beta) const {
         std::size_t best = m_;
         double best_w = 0.0;
@@ -470,7 +454,7 @@ private:
             for (std::size_t i = 0; i < n_; ++i) dist2 += (y[i] - centre[i]) * (y[i] - centre[i]);
             const double r2 = dist2 / scale2;
             const double weight = std::max(1.0, opts_.newuoa_weight ? r2 * r2 * r2 : r2);
-            const double sigma = inv_.omega_diag(j) * beta + vlag_[j] * vlag_[j];
+            const double sigma = hdiag_[j] * beta + vlag_[j] * vlag_[j];
             const double val = weight * sigma;
             if (best == m_ || val > best_w) {
                 best = j;
@@ -478,6 +462,10 @@ private:
             }
         }
         return best;
+    }
+
+    void fill_hdiag() {
+        for (std::size_t j = 0; j < m_; ++j) hdiag_[j] = inv_.omega_diag(j);
     }
 
     [[nodiscard]] double sigma_of(std::size_t t, double beta) const {
@@ -506,7 +494,7 @@ private:
         model_.absorb(t);
         for (std::size_t i = 0; i < n_; ++i) model_.points[t * n_ + i] = xnew_[i];
         model_.fval[t] = f;
-        inv_.omega_col(t, lam_);
+        inv_.omega_col_updated(t, lam_);
         for (std::size_t l = 0; l < m_; ++l) {
             lam_[l] *= diff;
             model_.mu[l] += lam_[l];
@@ -530,11 +518,11 @@ private:
     // The largest |Q(y_j) - F(y_j)| over the points, relative to the
     // spread of the values: zero to rounding while the model interpolates.
     void trace_interpolation(const char* where) {
-        std::vector<double> dj(n_), hd(n_);
+        std::vector<double> dj(n_);
         double worst = 0.0, spread = 0.0;
         for (std::size_t j = 0; j < m_; ++j) {
             for (std::size_t i = 0; i < n_; ++i) dj[i] = model_.point(j)[i] - model_.xopt()[i];
-            const double q = model_.fopt() + model_.change(dj, hd);
+            const double q = model_.fopt() + model_.change(dj, work2_);
             worst = std::max(worst, std::fabs(q - model_.fval[j]));
             spread = std::max(spread, std::fabs(model_.fval[j] - model_.fopt()));
         }
@@ -648,9 +636,9 @@ private:
             fval[j] = model_.fval[plan.origin[j]];
             mu[j] = model_.mu[plan.origin[j]];
         }
-        model_.points = plan.points;
-        model_.fval = fval;
-        model_.mu = mu;
+        std::copy(plan.points.begin(), plan.points.end(), model_.points.begin());
+        std::copy(fval.begin(), fval.end(), model_.fval.begin());
+        std::copy(mu.begin(), mu.end(), model_.mu.begin());
         model_.kopt = 0;
         error_count_ = 0;
         if (fresh.empty()) return false;
@@ -724,6 +712,7 @@ private:
             }
             const double beta =
                 inv_.vlag_beta(model_.points, model_.kopt, xnew_, vlag_, wv_, zw_, work_, sum_);
+            fill_hdiag();
             std::size_t t = select_t(model_.xopt(), beta);
             const double tau = vlag_[t];
             if (sigma_of(t, beta) <= kSigmaRatio * tau * tau) {
@@ -941,7 +930,8 @@ private:
     double error_steps_[kErrorHistory] = {};
     std::size_t error_next_ = 0, error_count_ = 0;
 
-    std::vector<double> xbase_, abs_lo_, abs_hi_, scratch_;
+    std::vector<double> scratch_;
+    std::span<double> xbase_, abs_lo_, abs_hi_, hdiag_;
     std::span<double> vlag_, wv_, zw_, dvec_, sum_, hcol_, ucol_, gamma_, cmat_;
     std::span<double> work_, work2_, d_, c_, gd_, xnew_, x_, lam_, shift_, xold_;
     std::vector<Side> sides_;

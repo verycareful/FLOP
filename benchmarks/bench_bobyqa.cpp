@@ -25,12 +25,12 @@
 //
 // The numbers to compare against, NLopt 2.7.1's BOBYQA (the Ubuntu 24.04
 // package) on the same rows with xtol_abs 1e-8, measured beside this file's
-// rows on 2026-11-05, x86-64, GCC 13.3, medians of five repetitions, in ns
-// per evaluation with evaluations per run in parentheses. Unbounded: 376
-// (26) at 2 parameters, 1825 (45) at 8, 5795 (61) at 16, 18286 (94) at 32,
-// 44531 (161) at 64, 118467 (289) at 128. Inside the box that never binds:
-// 306, 1846, 7218, 17829, 47491, 126886, with the same counts. Active box:
-// 352 (24), 2051 (45), 7141 (84), 29271 (135), 81430 (259) at 2 to 64.
+// rows on 2026-11-05, x86-64, GCC 13.3, medians of seven repetitions, in ns
+// per evaluation with evaluations per run in parentheses. Unbounded: 380
+// (26) at 2 parameters, 2400 (45) at 8, 6631 (61) at 16, 18306 (94) at 32,
+// 42184 (161) at 64, 118456 (289) at 128. Inside the box that never binds:
+// 385, 2383, 6292, 18375, 42963, 123541, with the same counts. Active box:
+// 354 (24), 2137 (45), 6489 (84), 31081 (135), 78812 (259) at 2 to 64.
 
 #include <benchmark/benchmark.h>
 

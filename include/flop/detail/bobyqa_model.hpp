@@ -47,8 +47,11 @@
 namespace flop::detail::bobyqa {
 
 inline double dot(std::span<const double> a, std::span<const double> b) noexcept {
+    const double* pa = a.data();
+    const double* pb = b.data();
+    const std::size_t n = a.size();
     double s = 0.0;
-    for (std::size_t i = 0; i < a.size(); ++i) s += a[i] * b[i];
+    for (std::size_t i = 0; i < n; ++i) s += pa[i] * pb[i];
     return s;
 }
 
@@ -79,8 +82,7 @@ public:
           nz_(m - n - 1),
           z_(m * (m - n - 1), 0.0),
           b_((m + n) * n, 0.0),
-          rot_c_(m - n - 1, 1.0),
-          rot_s_(m - n - 1, 0.0) {}
+          rot_(2 * (m - n - 1), 0.0) {}
 
     [[nodiscard]] std::size_t columns() const noexcept { return nz_; }
     double& z(std::size_t i, std::size_t c) noexcept { return z_[i * nz_ + c]; }
@@ -105,6 +107,14 @@ public:
             for (std::size_t c = 0; c < nz_; ++c) s += z(i, c) * z(t, c);
             out[i] = s;
         }
+    }
+
+    // out = Omega e_t right after update(t): row t of Z is then zero beyond
+    // its first entry, so Omega e_t is that entry times Z's first column,
+    // O(m) where omega_col is O(m (m - n - 1)).
+    void omega_col_updated(std::size_t t, std::span<double> out) const noexcept {
+        const double zt = z(t, 0);
+        for (std::size_t i = 0; i < m_; ++i) out[i] = zt * z(i, 0);
     }
 
     // Section 2, with the generality of (2.10): H and Z for the points
@@ -167,8 +177,13 @@ public:
             sum[k] = x[k] + xs[k];
         }
         for (std::size_t i = 0; i < m_; ++i) {
-            std::span<const double> yi(points.data() + i * n_, n_);
-            wv[i] = 0.5 * dot(yi, d) * dot(yi, sum);
+            const double* yi = points.data() + i * n_;
+            double yd = 0.0, ys = 0.0;
+            for (std::size_t k = 0; k < n_; ++k) {
+                yd += yi[k] * d[k];
+                ys += yi[k] * sum[k];
+            }
+            wv[i] = 0.5 * yd * ys;
         }
         // Z^T wv and B^T wv by rows, so that every pass runs along memory.
         for (std::size_t c = 0; c < nz_; ++c) zw[c] = 0.0;
@@ -219,13 +234,13 @@ public:
         for (std::size_t c = 1; c < nz_; ++c) {
             const double zc = zt_row[c];
             if (zc == 0.0) {
-                rot_c_[c] = 1.0;
-                rot_s_[c] = 0.0;
+                rot_[c] = 1.0;
+                rot_[nz_ + c] = 0.0;
                 continue;
             }
             const double r = std::hypot(zt_row[0], zc);
-            rot_c_[c] = zt_row[0] / r;
-            rot_s_[c] = zc / r;
+            rot_[c] = zt_row[0] / r;
+            rot_[nz_ + c] = zc / r;
             zt_row[0] = r;
             zt_row[c] = 0.0;
         }
@@ -234,7 +249,7 @@ public:
             double* zi = z_.data() + i * nz_;
             double a0 = zi[0];
             for (std::size_t c = 1; c < nz_; ++c) {
-                const double cs = rot_c_[c], sn = rot_s_[c];
+                const double cs = rot_[c], sn = rot_[nz_ + c];
                 const double ac = zi[c];
                 zi[c] = cs * ac - sn * a0;
                 a0 = cs * a0 + sn * ac;
@@ -250,13 +265,16 @@ public:
         for (std::size_t k = 0; k < n_; ++k) h[m_ + k] = b(t, k);
         for (std::size_t i = 0; i < m_ + n_; ++i) u[i] = -vlag[i];
         u[t] += 1.0;
+        // (4.9) row by row: alpha u_r u_c - beta h_r h_c + tau (h_r u_c +
+        // u_r h_c) = (alpha u_r + tau h_r) u_c + (tau u_r - beta h_r) h_c.
         const double inv = 1.0 / sigma;
+        const double* uc = u.data() + m_;
+        const double* hc = h.data() + m_;
         for (std::size_t r = 0; r < m_ + n_; ++r) {
-            for (std::size_t k = 0; k < n_; ++k) {
-                const double hc = h[m_ + k], uc = u[m_ + k];
-                b(r, k) +=
-                    inv * (alpha * u[r] * uc - beta * h[r] * hc + tau * (h[r] * uc + u[r] * hc));
-            }
+            const double pu = inv * (alpha * u[r] + tau * h[r]);
+            const double ph = inv * (tau * u[r] - beta * h[r]);
+            double* br = b_.data() + r * n_;
+            for (std::size_t k = 0; k < n_; ++k) br[k] += pu * uc[k] + ph * hc[k];
         }
         const double root = std::sqrt(sigma);
         for (std::size_t i = 0; i < m_; ++i) z(i, 0) = (tau * z(i, 0) + zt * u[i]) / root;
@@ -310,29 +328,38 @@ public:
 private:
     std::size_t n_, m_, nz_;
     std::vector<double> z_, b_;
-    std::vector<double> rot_c_, rot_s_;  // the rotations of update
+    std::vector<double> rot_;  // the rotations of update: cosines, then sines
 };
 
 // ============================================================================
 // Model: the points, their values, and the quadratic model of (4.6)-(4.7)
 // ============================================================================
 struct Model {
+    // The points, values, gradient, M and mu share one allocation; the
+    // spans point into it, so a Model is not copyable.
     Model(std::size_t n_, std::size_t m_)
         : n(n_),
           m(m_),
-          points(m_ * n_, 0.0),
-          fval(m_, 0.0),
-          g(n_, 0.0),
-          hq(n_ * n_, 0.0),
-          mu(m_, 0.0) {}
+          buf(m_ * n_ + m_ + n_ + n_ * n_ + m_, 0.0),
+          points(buf.data(), m_ * n_),
+          fval(buf.data() + m_ * n_, m_),
+          g(buf.data() + m_ * n_ + m_, n_),
+          hq(buf.data() + m_ * n_ + m_ + n_, n_ * n_),
+          mu(buf.data() + m_ * n_ + m_ + n_ + n_ * n_, m_) {}
+    Model(const Model&) = delete;
+    Model& operator=(const Model&) = delete;
+    Model(Model&&) = delete;
+    Model& operator=(Model&&) = delete;
+    ~Model() = default;
 
     std::size_t n, m;
-    std::vector<double> points;  // m x n offsets from the origin
-    std::vector<double> fval;
+    std::vector<double> buf;
+    std::span<double> points;  // m x n offsets from the origin
+    std::span<double> fval;
     std::size_t kopt = 0;
-    std::vector<double> g;   // gradient of Q at x_kopt
-    std::vector<double> hq;  // M of (4.6), symmetric, full storage
-    std::vector<double> mu;  // the mu_l of (4.6)
+    std::span<double> g;   // gradient of Q at x_kopt
+    std::span<double> hq;  // M of (4.6), symmetric, full storage
+    std::span<double> mu;  // the mu_l of (4.6)
 
     [[nodiscard]] std::span<const double> point(std::size_t j) const noexcept {
         return {points.data() + j * n, n};
@@ -363,7 +390,11 @@ struct Model {
         return s;
     }
 
-    // Q(x_kopt + d) - Q(x_kopt) = g.d + (1/2) d^T (nabla^2 Q) d, by (4.7).
+    // work receives the product (nabla^2 Q) d. The product, not the
+    // quadratic form summed directly, because under -ffast-math a sum of
+    // m + n^2 terms is one the compiler may reassociate differently in each
+    // instantiation of the solver, and the scalar and batch channels must
+    // run the same trajectory.
     [[nodiscard]] double change(std::span<const double> d, std::span<double> work) const noexcept {
         hess_mul(d, work);
         return dot(g, d) + 0.5 * dot(d, work);
@@ -403,10 +434,25 @@ struct Model {
 // ============================================================================
 // A coordinate without a bound on a side has no entry there: no sentinel.
 struct Box {
-    explicit Box(std::size_t n) : has_lo(n, 0), has_hi(n, 0), lo(n, 0.0), hi(n, 0.0) {}
+    // Two allocations: the flags, and the offsets. Not copyable, since the
+    // spans point into them.
+    explicit Box(std::size_t n)
+        : flags(2 * n, 0),
+          vals(2 * n, 0.0),
+          has_lo(flags.data(), n),
+          has_hi(flags.data() + n, n),
+          lo(vals.data(), n),
+          hi(vals.data() + n, n) {}
+    Box(const Box&) = delete;
+    Box& operator=(const Box&) = delete;
+    Box(Box&&) = delete;
+    Box& operator=(Box&&) = delete;
+    ~Box() = default;
 
-    std::vector<char> has_lo, has_hi;
-    std::vector<double> lo, hi;
+    std::vector<char> flags;
+    std::vector<double> vals;
+    std::span<char> has_lo, has_hi;
+    std::span<double> lo, hi;
 
     void shift(std::span<const double> s) noexcept {
         for (std::size_t i = 0; i < s.size(); ++i) {

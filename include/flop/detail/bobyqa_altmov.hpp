@@ -82,6 +82,17 @@ inline void lag_hess_mul(const Model& model, std::span<const double> lambda,
     }
 }
 
+// s^T (nabla^2 Lambda_t) s = sum_l lambda_l (y_l.s)^2.
+inline double lag_curvature(const Model& model, std::span<const double> lambda,
+                            std::span<const double> v) noexcept {
+    double s = 0.0;
+    for (std::size_t l = 0; l < model.m; ++l) {
+        const double yv = dot(model.point(l), v);
+        s += lambda[l] * yv * yv;
+    }
+    return s;
+}
+
 }  // namespace altmov_detail
 
 // d, dside: the line step; c, cside: the Cauchy step. Returns
@@ -264,9 +275,8 @@ inline double altmov(const Model& model, const Inverse& inv, const Box& box, std
         // Lambda_t along gamma s for gamma in [0, 1]: g.s gamma + (1/2) s^T
         // (nabla^2 Lambda_t) s gamma^2, for sign * Lambda_t.
         for (std::size_t i = 0; i < n; ++i) w.s[i] *= scale;
-        altmov_detail::lag_hess_mul(model, w.lambda, w.s, w.hv);
         const double lin = sign * dot(w.glag, w.s);
-        const double crv = sign * dot(w.s, w.hv);
+        const double crv = sign * altmov_detail::lag_curvature(model, w.lambda, w.s);
         double gamma = 1.0;
         if (crv > 0.0 && -lin < crv) gamma = -lin / crv;
         if (gamma < 0.0) gamma = 0.0;
