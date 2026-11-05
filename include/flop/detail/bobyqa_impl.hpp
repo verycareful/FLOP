@@ -184,26 +184,49 @@ public:
             }
         }
         const std::size_t nz = m_ - n_ - 1;
-        vlag_.assign(m_ + n_, 0.0);
-        wv_.assign(m_, 0.0);
-        zw_.assign(nz, 0.0);
-        dvec_.assign(n_, 0.0);
-        sum_.assign(n_, 0.0);
-        hcol_.assign(m_ + n_, 0.0);
-        ucol_.assign(m_ + n_, 0.0);
-        gamma_.assign(n_ * m_, 0.0);
-        cmat_.assign(m_ * n_, 0.0);
-        work_.assign(n_, 0.0);
-        work2_.assign(n_, 0.0);
-        d_.assign(n_, 0.0);
-        c_.assign(n_, 0.0);
-        gd_.assign(n_, 0.0);
-        xnew_.assign(n_, 0.0);
-        x_.assign(n_, 0.0);
-        lam_.assign(m_, 0.0);
-        side_.assign(n_, Side::Free);
-        cside_.assign(n_, Side::Free);
+        // Every scratch vector of the solver is cut from one buffer.
+        const std::size_t sizes[] = {m_ + n_, m_,      nz, n_, n_, m_ + n_, m_ + n_,
+                                     n_ * m_, m_ * n_, n_, n_, n_, n_,      n_,
+                                     n_,      n_,      m_, n_, n_};
+        std::size_t total = 0;
+        for (const std::size_t k : sizes) total += k;
+        scratch_.assign(total, 0.0);
+        std::size_t at = 0;
+        const auto carve = [&](std::size_t k) {
+            const std::span<double> v(scratch_.data() + at, k);
+            at += k;
+            return v;
+        };
+        vlag_ = carve(m_ + n_);
+        wv_ = carve(m_);
+        zw_ = carve(nz);
+        dvec_ = carve(n_);
+        sum_ = carve(n_);
+        hcol_ = carve(m_ + n_);
+        ucol_ = carve(m_ + n_);
+        gamma_ = carve(n_ * m_);
+        cmat_ = carve(m_ * n_);
+        work_ = carve(n_);
+        work2_ = carve(n_);
+        d_ = carve(n_);
+        c_ = carve(n_);
+        gd_ = carve(n_);
+        xnew_ = carve(n_);
+        x_ = carve(n_);
+        lam_ = carve(m_);
+        shift_ = carve(n_);
+        xold_ = carve(n_);
+        sides_.assign(2 * n_, Side::Free);
+        side_ = std::span<Side>(sides_.data(), n_);
+        cside_ = std::span<Side>(sides_.data() + n_, n_);
     }
+
+    // The scratch spans point into this object's own buffers.
+    Solver(const Solver&) = delete;
+    Solver& operator=(const Solver&) = delete;
+    Solver(Solver&&) = delete;
+    Solver& operator=(Solver&&) = delete;
+    ~Solver() = default;
 
     Result run() {
         initialize();
@@ -463,7 +486,9 @@ private:
 
     // Section 6, (6.13)-(6.17): the origin moves to x_k.
     void shift_origin() {
-        std::vector<double> s(model_.xopt().begin(), model_.xopt().end());
+        std::span<const double> xk = model_.xopt();
+        std::copy(xk.begin(), xk.end(), shift_.begin());
+        const std::span<const double> s = shift_;
         inv_.shift(model_.points, s, gamma_, cmat_, zw_, work_);
         model_.shift_hessian(s, work_);
         for (std::size_t j = 0; j < m_; ++j)
@@ -475,7 +500,8 @@ private:
     // Section 4: point t becomes xnew with value f, H already updated for
     // it. diff = f - Q(xnew).
     void update_model(std::size_t t, double f, double diff) {
-        std::vector<double> xold(model_.xopt().begin(), model_.xopt().end());
+        std::copy(model_.xopt().begin(), model_.xopt().end(), xold_.begin());
+        const std::span<const double> xold = xold_;
         const bool improved = f < model_.fopt();
         model_.absorb(t);
         for (std::size_t i = 0; i < n_; ++i) model_.points[t * n_ + i] = xnew_[i];
@@ -693,9 +719,8 @@ private:
             double xk2 = 0.0;
             for (std::size_t i = 0; i < n_; ++i) xk2 += xk[i] * xk[i];
             if (d2 <= kShiftRatio * xk2) {
-                std::vector<double> s(xk.begin(), xk.end());
                 shift_origin();
-                for (std::size_t i = 0; i < n_; ++i) xnew_[i] -= s[i];
+                for (std::size_t i = 0; i < n_; ++i) xnew_[i] -= shift_[i];
             }
             const double beta =
                 inv_.vlag_beta(model_.points, model_.kopt, xnew_, vlag_, wv_, zw_, work_, sum_);
@@ -807,6 +832,11 @@ private:
             double dalt = delta_;
             if (dist < kFar * delta_) dalt = std::max(kAltDelta * dist, rho_);
             const double cauchy2 = altmov(model_, inv_, box_, t, dalt, d_, side_, c_, cside_, aw_);
+            // (6.13) applies to this step as to a trust-region one: every
+            // step of length at least rho / 2. Both candidate steps are
+            // displacements from x_k, so they survive the shift unchanged.
+            const double dd = dot(d_, d_);
+            if (dd >= 0.25 * rho_ * rho_ && dd <= kShiftRatio * dot(xk, xk)) shift_origin();
             place(box_, xk, d_, side_, xnew_);
             double beta =
                 inv_.vlag_beta(model_.points, model_.kopt, xnew_, vlag_, wv_, zw_, work_, sum_);
@@ -911,10 +941,11 @@ private:
     double error_steps_[kErrorHistory] = {};
     std::size_t error_next_ = 0, error_count_ = 0;
 
-    std::vector<double> xbase_, abs_lo_, abs_hi_, vlag_, wv_, zw_, dvec_, sum_, hcol_, ucol_,
-        gamma_, cmat_;
-    std::vector<double> work_, work2_, d_, c_, gd_, xnew_, x_, lam_;
-    std::vector<Side> side_, cside_;
+    std::vector<double> xbase_, abs_lo_, abs_hi_, scratch_;
+    std::span<double> vlag_, wv_, zw_, dvec_, sum_, hcol_, ucol_, gamma_, cmat_;
+    std::span<double> work_, work2_, d_, c_, gd_, xnew_, x_, lam_, shift_, xold_;
+    std::vector<Side> sides_;
+    std::span<Side> side_, cside_;
 };
 
 }  // namespace flop::detail::bobyqa

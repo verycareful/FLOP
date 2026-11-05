@@ -74,7 +74,13 @@ constexpr Pair extra_pair(std::size_t n, std::size_t e) noexcept {
 class Inverse {
 public:
     Inverse(std::size_t n, std::size_t m)
-        : n_(n), m_(m), nz_(m - n - 1), z_(m * (m - n - 1), 0.0), b_((m + n) * n, 0.0) {}
+        : n_(n),
+          m_(m),
+          nz_(m - n - 1),
+          z_(m * (m - n - 1), 0.0),
+          b_((m + n) * n, 0.0),
+          rot_c_(m - n - 1, 1.0),
+          rot_s_(m - n - 1, 0.0) {}
 
     [[nodiscard]] std::size_t columns() const noexcept { return nz_; }
     double& z(std::size_t i, std::size_t c) noexcept { return z_[i * nz_ + c]; }
@@ -164,22 +170,26 @@ public:
             std::span<const double> yi(points.data() + i * n_, n_);
             wv[i] = 0.5 * dot(yi, d) * dot(yi, sum);
         }
-        for (std::size_t c = 0; c < nz_; ++c) {
-            double t = 0.0;
-            for (std::size_t i = 0; i < m_; ++i) t += z(i, c) * wv[i];
-            zw[c] = t;
+        // Z^T wv and B^T wv by rows, so that every pass runs along memory.
+        for (std::size_t c = 0; c < nz_; ++c) zw[c] = 0.0;
+        for (std::size_t k = 0; k < n_; ++k) vlag[m_ + k] = 0.0;
+        for (std::size_t i = 0; i < m_; ++i) {
+            const double wi = wv[i];
+            const double* zi = z_.data() + i * nz_;
+            for (std::size_t c = 0; c < nz_; ++c) zw[c] += zi[c] * wi;
+            const double* bi = b_.data() + i * n_;
+            for (std::size_t k = 0; k < n_; ++k) vlag[m_ + k] += bi[k] * wi;
         }
         for (std::size_t i = 0; i < m_; ++i) {
+            const double* zi = z_.data() + i * nz_;
             double t = 0.0;
-            for (std::size_t c = 0; c < nz_; ++c) t += z(i, c) * zw[c];
-            t += dot(b_row(i), d);
-            vlag[i] = t;
+            for (std::size_t c = 0; c < nz_; ++c) t += zi[c] * zw[c];
+            vlag[i] = t + dot(b_row(i), d);
         }
-        for (std::size_t k = 0; k < n_; ++k) {
-            double t = 0.0;
-            for (std::size_t i = 0; i < m_; ++i) t += b(i, k) * wv[i];
-            for (std::size_t l = 0; l < n_; ++l) t += b(m_ + l, k) * d[l];
-            vlag[m_ + k] = t;
+        for (std::size_t l = 0; l < n_; ++l) {
+            const double dl = d[l];
+            const double* bl = b_.data() + (m_ + l) * n_;
+            for (std::size_t k = 0; k < n_; ++k) vlag[m_ + k] += bl[k] * dl;
         }
         // (w - v)^T H (w - v), then (4.13): w^T H w = that + 2 w_s - v_s
         // with w_s = (1/2)(x_s.x)^2 and v_s = (1/2)|x_s|^4.
@@ -201,18 +211,35 @@ public:
     // length m + n.
     void update(std::size_t t, std::span<const double> vlag, double beta, std::span<double> h,
                 std::span<double> u) noexcept {
-        // Givens rotations of Z's columns 0 and c: Z Z^T is unchanged.
+        // Givens rotations of Z's columns 0 and c, c = 1, 2, ..., in turn: Z
+        // Z^T is unchanged. Each rotation is fixed by row t alone, so row t
+        // is rotated first and the angles kept; the other rows then take all
+        // the rotations in the same order, one row at a time along memory.
+        double* zt_row = z_.data() + t * nz_;
         for (std::size_t c = 1; c < nz_; ++c) {
-            const double zc = z(t, c);
-            if (zc == 0.0) continue;
-            const double r = std::hypot(z(t, 0), zc);
-            const double cs = z(t, 0) / r, sn = zc / r;
-            for (std::size_t i = 0; i < m_; ++i) {
-                const double a0 = z(i, 0), ac = z(i, c);
-                z(i, 0) = cs * a0 + sn * ac;
-                z(i, c) = cs * ac - sn * a0;
+            const double zc = zt_row[c];
+            if (zc == 0.0) {
+                rot_c_[c] = 1.0;
+                rot_s_[c] = 0.0;
+                continue;
             }
-            z(t, c) = 0.0;
+            const double r = std::hypot(zt_row[0], zc);
+            rot_c_[c] = zt_row[0] / r;
+            rot_s_[c] = zc / r;
+            zt_row[0] = r;
+            zt_row[c] = 0.0;
+        }
+        for (std::size_t i = 0; i < m_; ++i) {
+            if (i == t) continue;
+            double* zi = z_.data() + i * nz_;
+            double a0 = zi[0];
+            for (std::size_t c = 1; c < nz_; ++c) {
+                const double cs = rot_c_[c], sn = rot_s_[c];
+                const double ac = zi[c];
+                zi[c] = cs * ac - sn * a0;
+                a0 = cs * a0 + sn * ac;
+            }
+            zi[0] = a0;
         }
         const double zt = z(t, 0);
         const double alpha = zt * zt;
@@ -283,6 +310,7 @@ public:
 private:
     std::size_t n_, m_, nz_;
     std::vector<double> z_, b_;
+    std::vector<double> rot_c_, rot_s_;  // the rotations of update
 };
 
 // ============================================================================

@@ -38,21 +38,34 @@
 
 namespace flop::detail::bobyqa {
 
+// The workspace, in three allocations: the doubles from one buffer, the
+// flags, and the two arrays of sides. Not copyable, since the spans point
+// into the buffers.
 struct AltmovWork {
     AltmovWork(std::size_t n, std::size_t m)
-        : lambda(m),
-          glag(n),
-          dir(n),
-          s(n),
-          best_s(n),
-          shat(n),
-          hv(n),
-          inset(n),
-          sside(n),
-          best_side(n) {}
-    std::vector<double> lambda, glag, dir, s, best_s, shat, hv;
+        : buf(m + 6 * n, 0.0),
+          lambda(buf.data(), m),
+          glag(buf.data() + m, n),
+          dir(buf.data() + m + n, n),
+          s(buf.data() + m + 2 * n, n),
+          best_s(buf.data() + m + 3 * n, n),
+          shat(buf.data() + m + 4 * n, n),
+          hv(buf.data() + m + 5 * n, n),
+          inset(n, 0),
+          sides(2 * n, Side::Free),
+          sside(sides.data(), n),
+          best_side(sides.data() + n, n) {}
+    AltmovWork(const AltmovWork&) = delete;
+    AltmovWork& operator=(const AltmovWork&) = delete;
+    AltmovWork(AltmovWork&&) = delete;
+    AltmovWork& operator=(AltmovWork&&) = delete;
+    ~AltmovWork() = default;
+
+    std::vector<double> buf;
+    std::span<double> lambda, glag, dir, s, best_s, shat, hv;
     std::vector<char> inset;
-    std::vector<Side> sside, best_side;
+    std::vector<Side> sides;
+    std::span<Side> sside, best_side;
 };
 
 namespace altmov_detail {

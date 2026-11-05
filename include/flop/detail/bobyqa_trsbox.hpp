@@ -29,11 +29,10 @@
 //                first minimum of Q along the arc.
 //
 // The report finds theta_Q and theta_B "approximately". Here theta_B is
-// exact to rounding: each coordinate is a sinusoid in theta, whose least and
-// greatest values on the interval are at its ends or at its one critical
-// point there, and the first crossing is bisected. theta_Q is the first
-// zero of dQ/dtheta, located by sampling the derivative at kArcSamples
-// equal steps of [0, pi/4] and refined by bisection.
+// exact to rounding: each coordinate is a sinusoid in theta, and the angle
+// at which it reaches a bound is in closed form. theta_Q is the first zero
+// of dQ/dtheta, located by sampling the derivative at kArcSamples equal
+// steps of [0, pi/4] and refined by Illinois regula falsi.
 //
 // The CG phase is also limited to as many steps per restart as there are
 // free coordinates, the number after which conjugate gradients on a
@@ -44,6 +43,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <vector>
@@ -58,9 +58,27 @@ constexpr double kArcStop = 1e-4;
 // The samples of dQ/dtheta along the arc (see the header).
 constexpr std::size_t kArcSamples = 16;
 
+// The workspace, in two allocations: six vectors of n doubles cut from one
+// buffer, and the free flags. Not copyable, since the spans point into the
+// buffer.
 struct TrsboxWork {
-    explicit TrsboxWork(std::size_t n) : s(n), hs(n), pd(n), pg(n), hpd(n), x(n), free(n) {}
-    std::vector<double> s, hs, pd, pg, hpd, x;
+    explicit TrsboxWork(std::size_t n)
+        : buf(6 * n, 0.0),
+          s(buf.data(), n),
+          hs(buf.data() + n, n),
+          pd(buf.data() + 2 * n, n),
+          pg(buf.data() + 3 * n, n),
+          hpd(buf.data() + 4 * n, n),
+          x(buf.data() + 5 * n, n),
+          free(n, 0) {}
+    TrsboxWork(const TrsboxWork&) = delete;
+    TrsboxWork& operator=(const TrsboxWork&) = delete;
+    TrsboxWork(TrsboxWork&&) = delete;
+    TrsboxWork& operator=(TrsboxWork&&) = delete;
+    ~TrsboxWork() = default;
+
+    std::vector<double> buf;
+    std::span<double> s, hs, pd, pg, hpd, x;
     std::vector<char> free;
 };
 
@@ -75,19 +93,36 @@ struct TrsboxResult {
 
 namespace trsbox_detail {
 
-// The first theta in (0, top] at which f(theta) > 0 changes to f <= 0,
-// given f(0) > 0 and f(top) <= 0, by bisection to rounding.
-template <class F>
-double bisect(F f, double top) {
-    double lo = 0.0, hi = top;
-    for (;;) {
-        const double mid = 0.5 * (lo + hi);
-        if (!(mid > lo && mid < hi)) return hi;
-        if (f(mid) > 0.0)
-            lo = mid;
-        else
-            hi = mid;
+// The first theta in (0, top] at which g changes from positive to
+// nonpositive, given g(0) > 0 and g(top) <= 0: regula falsi with the
+// Illinois modification (the retained end's value is halved whenever the
+// same end is kept twice), which converges superlinearly. It stops when the
+// bracket is within rounding of top or the new point does not land inside
+// it, and returns the nonpositive end.
+template <class G>
+double first_root(G g, double top) {
+    double a = 0.0, ga = g(0.0), b = top, gb = g(top);
+    int kept = 0;
+    const double tiny = std::numeric_limits<double>::epsilon() * top;
+    while (b - a > tiny) {
+        const double denom = ga - gb;
+        if (!(denom > 0.0)) break;
+        const double c = b - gb * (b - a) / denom;
+        if (!(c > a && c < b)) break;
+        const double gc = g(c);
+        if (gc > 0.0) {
+            a = c;
+            ga = gc;
+            if (kept == -1) gb *= 0.5;
+            kept = -1;
+        } else {
+            b = c;
+            gb = gc;
+            if (kept == 1) ga *= 0.5;
+            kept = 1;
+        }
     }
+    return b;
 }
 
 }  // namespace trsbox_detail
@@ -249,57 +284,53 @@ inline TrsboxResult trsbox(const Model& model, const Box& box, double delta, std
         for (std::size_t k = 1; k <= kArcSamples; ++k) {
             const double th = kQuarter * static_cast<double>(k) / static_cast<double>(kArcSamples);
             if (fp(th) >= 0.0) {
-                theta_q = trsbox_detail::bisect([&](double t) { return -fp(t); }, th);
+                theta_q = trsbox_detail::first_root([&](double t) { return -fp(t); }, th);
                 break;
             }
         }
-        // theta_B: per free coordinate, x_k[i] + d[i] cos + s[i] sin must
-        // stay in [lo, hi]; the first exit over all coordinates.
+        // theta_B: per free coordinate, x_k[i] + d[i] cos + s[i] sin, that
+        // is x_k[i] + R cos(theta - phi) with R = |(d[i], s[i])| and phi =
+        // atan2(s[i], d[i]), must stay in [lo, hi]. It reaches a level q
+        // going down at theta = phi + acos(q / R) and going up at phi -
+        // acos(q / R), modulo 2 pi; the first exit over all coordinates in
+        // (0, theta] is theta_B.
         double theta = theta_q;
         std::size_t ib = n;
         bool ib_upper = false;
+        constexpr double kTwoPi = 2.0 * std::numbers::pi;
+        const auto wrap = [&](double a) {
+            while (a < 0.0) a += kTwoPi;
+            while (a >= kTwoPi) a -= kTwoPi;
+            return a;
+        };
         for (std::size_t i = 0; i < n; ++i) {
             if (!w.free[i]) continue;
             const double di = d[i], si = w.s[i], xi = xk[i];
-            const auto coord = [&](double th) {
-                return xi + di * std::cos(th) + si * std::sin(th);
-            };
-            // The least and greatest of di cos + si sin on [0, theta]: the
-            // ends, or the critical point atan2(si, di) (a maximum) or that
-            // plus pi (a minimum) when inside.
-            double lo_v = coord(0.0), hi_v = lo_v;
-            const double end_v = coord(theta);
-            lo_v = std::fmin(lo_v, end_v);
-            hi_v = std::fmax(hi_v, end_v);
-            double crit = std::atan2(si, di);
-            for (int rep = 0; rep < 3; ++rep) {
-                if (crit > 0.0 && crit < theta) {
-                    const double v = coord(crit);
-                    lo_v = std::fmin(lo_v, v);
-                    hi_v = std::fmax(hi_v, v);
-                }
-                crit += std::numbers::pi;
-                if (crit > 2.0 * std::numbers::pi) crit -= 2.0 * std::numbers::pi;
-            }
-            if (box.has_lo[i] && lo_v < box.lo[i]) {
-                const double lb = box.lo[i];
-                const double th =
-                    coord(0.0) <= lb
-                        ? 0.0
-                        : trsbox_detail::bisect([&](double t) { return coord(t) - lb; }, theta);
-                if (th < theta || ib == n) {
+            const double r = std::hypot(di, si);
+            if (!(r > 0.0)) continue;
+            const double phi = std::atan2(si, di);
+            const double here = xi + di;
+            if (box.has_lo[i]) {
+                const double q = (box.lo[i] - xi) / r;
+                double th = -1.0;
+                if (here <= box.lo[i] && si < 0.0)
+                    th = 0.0;
+                else if (q > -1.0 && q < 1.0)
+                    th = wrap(phi + std::acos(q));
+                if (th >= 0.0 && th < theta) {
                     theta = th;
                     ib = i;
                     ib_upper = false;
                 }
             }
-            if (box.has_hi[i] && hi_v > box.hi[i]) {
-                const double ub = box.hi[i];
-                const double th =
-                    coord(0.0) >= ub
-                        ? 0.0
-                        : trsbox_detail::bisect([&](double t) { return ub - coord(t); }, theta);
-                if (th < theta || ib == n) {
+            if (box.has_hi[i]) {
+                const double q = (box.hi[i] - xi) / r;
+                double th = -1.0;
+                if (here >= box.hi[i] && si > 0.0)
+                    th = 0.0;
+                else if (q > -1.0 && q < 1.0)
+                    th = wrap(phi - std::acos(q));
+                if (th >= 0.0 && th < theta) {
                     theta = th;
                     ib = i;
                     ib_upper = true;
