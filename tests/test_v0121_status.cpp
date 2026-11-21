@@ -166,12 +166,10 @@ TEST(V0121Status, StopValueEndsTheRunAtTheEvaluationThatMeetsItAfterTheStartingP
 }
 
 TEST(V0121Status, StopValueEndsAScalarRunAtTheStartingPointThatMeetsIt) {
-    // Red on purpose: the scalar channel evaluates all 2n + 1 starting points
-    // even when the second of them is at or below the stop value, because the
-    // loop over them does not look at the stop; the batch channel does that
-    // by design (the call is made whole) but the scalar one has no call to
-    // make whole. docs/algorithms/bobyqa.md says the run stops on stop_value
-    // after every evaluation.
+    // The scalar channel ends at the starting point that is at or below the
+    // stop value, and the points after it are not evaluated:
+    // docs/algorithms/bobyqa.md says the run stops on stop_value after every
+    // evaluation. The batch channel evaluates the whole call, by design.
     const Vec x0{0.1, 0.1};
     for (const double stop : {0.2, 0.05, quadratic(x0)}) {
         flop::bobyqa::Options o = v0121::options(0.5, 1000);

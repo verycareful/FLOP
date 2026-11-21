@@ -152,18 +152,18 @@ TEST(V0121Bounds, EveryEvaluationOfEveryKindOfRunIsInsideTheBoxAndOnABoundWhereI
     }
     EXPECT_GT(runs, 200u);
     EXPECT_GT(on_bound_points, 200u) << "points on a bound must have been exercised";
-    // Red on purpose: a coordinate a rounding error inside a bound it should be
-    // on. The offsets of the box from the origin are rounded when the origin is
-    // set or moved, and a step onto the bound is snapped to it only when its
-    // offset reaches the rounded one.
+    // A coordinate within four units in the last place of a bound is that
+    // bound to the bit. The offsets of the box from the origin are rounded when
+    // the origin is set or moved, and a coordinate on a bound whose model
+    // gradient is rounding noise steps by about that much.
     EXPECT_EQ(misses, 0u) << "coordinates within 4 ulp of a bound but not on it";
 }
 
 TEST(V0121Bounds, AnX0MovedToDeltaInsideABoundHasItsOppositePointExactlyOnTheBound) {
-    // Red on purpose. x0 = 0.2 is within the first radius 0.3 of the lower
-    // bound 0.1, so it is moved to 0.1 + 0.3 (Powell, section 2), and
-    // x0 - Delta e_1 is then the bound itself; the point must be 0.1 to the bit,
-    // not 0.4 - 0.3 = 0.10000000000000003.
+    // x0 = 0.2 is within the first radius 0.3 of the lower bound 0.1, so it is
+    // moved to 0.1 + 0.3 (Powell, page 5, before (2.2)), and x0 - Delta e_1 is
+    // then the bound itself; the point is 0.1 to the bit, not
+    // 0.4 - 0.3 = 0.10000000000000003.
     flop::bobyqa::Options o = v0121::options(0.3, 3);
     o.bounds = flop::Bounds::box(Vec{0.1}, Vec{5.0});
     const Outcome t = run(v0111::sphere, Vec{0.2}, o);

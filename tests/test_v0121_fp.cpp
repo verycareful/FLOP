@@ -15,12 +15,12 @@
 // give a finite result; and a run that reports success reports the right
 // answer.
 //
-// The last is red on purpose. An objective multiplied by 1e140 or more, or by
-// 1e-200 or less, ends with XtolReached after 23 evaluations at a point 0.19
-// from the minimiser: a success that is wrong. The values are far inside the
-// range of a double, and the same objective scaled by anything from 1e-50 to
-// 1e100 is solved. Runs that may not end are given a deadline, and one that
-// does not fails its test.
+// The last holds for an objective multiplied by any scale from 1e-200 to
+// 1e200, far inside the range of a double: TRSBOX squares the gradient and
+// forms products of three of its factors, so past a binary exponent of 102 in
+// the gradient it runs on a model scaled by a power of two
+// (docs/algorithms/bobyqa.md). Runs that may not end are given a deadline, and
+// one that does not fails its test.
 
 #include <gtest/gtest.h>
 
@@ -193,8 +193,8 @@ TEST(V0121Fp, ProblemsFarFromTheOriginAreSolvedWithoutAnyNonFiniteCoordinate) {
 }
 
 TEST(V0121Fp, AReportedSuccessIsTheRightAnswerAtEveryScaleOfTheObjective) {
-    // Red on purpose, see the file header. The scales from 1e-50 to 1e100 are
-    // here as well, and pass.
+    // A run that reports success reports the minimiser, at every scale of the
+    // objective from 1e-200 to 1e200.
     for (const double scale : {1e-50, 1e-10, 1.0, 1e10, 1e100, 1e140, 1e200, 1e-200}) {
         const auto seen = deadline_run(scale, 0.0, 2, std::chrono::milliseconds(10000));
         ASSERT_NE(seen, nullptr) << "the run did not end: scale " << scale;
