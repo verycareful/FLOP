@@ -75,6 +75,15 @@ FetchContent_MakeAvailable(googletest)
 #                  halving, the short step of (6.5), (6.6) ending at rho_end, (6.13)
 #   rescue         section 5: (5.4) and (5.5), the iteration of (5.6) and (5.7) written out
 #                  again, the inverse left behind, (5.3) and (5.12)
+#   status         rho_end and the floor, StopValue, the exact cap and its prefix, the best point
+#   bounds         every evaluation in the box, on a bound to the bit, faces and corners, a box
+#                  never reached, the first radius against a narrow box
+#   batch          the call shape of the starting points and RESCUE; scalar and batch identical
+#   fp             determinism, scale covariance under powers of two, extremes, a success is right
+#   facade         Minimizer against the template, every setter, refusals, reuse and move
+#   header         flop/bobyqa.hpp alone; facade_header: flop/minimizer.hpp alone, no BOBYQA in it
+#   corpus         the header and API examples, sphere, More-Garbow-Hillstrom, the report's
+#                  section 7 problems against its Tables 1 to 3
 #
 # Both:
 #   range          the coordinate range: refusals at entry, the error at run time
@@ -121,6 +130,14 @@ set(FLOP_TEST_SOURCES
     test_v0121_altmov.cpp
     test_v0121_control.cpp
     test_v0121_rescue.cpp
+    test_v0121_status.cpp
+    test_v0121_bounds.cpp
+    test_v0121_batch.cpp
+    test_v0121_fp.cpp
+    test_v0121_facade.cpp
+    test_v0121_header.cpp
+    test_v0121_facade_header.cpp
+    test_v0121_corpus.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines
