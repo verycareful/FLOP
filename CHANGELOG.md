@@ -7,6 +7,46 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.2.3] - 2026-11-21 20:07 IST
+
+Two things kept the workflows red after 0.1.2.2: the Lint workflow, red since
+0.1.2.1, and two of the CI test jobs. Two tests change; nothing in the library
+does.
+
+### Fixed
+
+- clang-tidy 22 reported four `bugprone-unchecked-optional-access` errors in
+  `tests/test_v0121_bounds.cpp`. A bound was tested with `if (b.lower[i])` and
+  read with `*b.lower[i]`, two separate calls of `vector::operator[]`, which
+  the analysis cannot prove return the same element. The test binds each
+  bound to a reference first, as the other tests in the file do. What the test
+  asserts does not change.
+- The test of the trigonometric sum of squares of section 7 of the report
+  failed on one instance (n = 20, m = 26, seed 5) with GCC 14 and with clang
+  under -ffast-math on the CI runners: its error in x was 3.8e-5 and 4.0e-5
+  against a limit of 2.5e-5, four thirds of the greatest accuracy in the
+  report's tables. The library did not change between the releases and the
+  thirty instances are bit for bit the same on my machine, so the limit was
+  the problem: the error in x at the end of a run is not bounded by the final
+  radius, because the Hessian of the sum is nearly singular in some
+  directions, and over 120 instances of that row the error had a median of
+  6e-6 and a greatest value of 3.3e-5, with one in 120 above the old limit on
+  my own machine. The limit is now three times the report's greatest accuracy,
+  5.7e-5, which still fails a run that ends far from the minimiser.
+
+### Changed
+
+- `docs/algorithms/bobyqa.md` says the accuracy on the report's test problem is
+  held to three times the greatest of the tables, and why.
+
+### Results
+
+440 tests across 49 suites, all passed in both binaries, strict and
+-ffast-math (4.3 s strict, 4.0 s -ffast-math on GCC, Linux x86-64; GCC 16.2.1,
+GCC 14.3.1, clang 23.1.5, and GCC 16.2.1 with the library under -ffast-math).
+Three tests skip by design in the clang -ffast-math binary: they hand the
+library a NaN by value, which that compiler treats as undefined.
+
 ## [0.1.2.2] - 2026-11-21 19:40 IST
 
 The fixes for the eight things the 0.1.2.1 tests found. Every test that was

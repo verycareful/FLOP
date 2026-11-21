@@ -135,18 +135,23 @@ TEST(V0121Bounds, EveryEvaluationOfEveryKindOfRunIsInsideTheBoxAndOnABoundWhereI
             expect_inside(t.trace, b, "random box");
             misses += near_misses(t.trace, b);
             for (std::size_t i = 0; i < n; ++i) {
-                if (b.lower[i]) {
-                    EXPECT_GE(t.r.x[i], *b.lower[i]);
+                const std::optional<double>& lo = b.lower[i];
+                const std::optional<double>& hi = b.upper[i];
+                if (lo.has_value()) {
+                    EXPECT_GE(t.r.x[i], *lo);
                 }
-                if (b.upper[i]) {
-                    EXPECT_LE(t.r.x[i], *b.upper[i]);
+                if (hi.has_value()) {
+                    EXPECT_LE(t.r.x[i], *hi);
                 }
             }
-            for (const auto& p : t.trace)
-                for (std::size_t i = 0; i < n; ++i)
-                    if ((b.lower[i] && p.x[i] == *b.lower[i]) ||
-                        (b.upper[i] && p.x[i] == *b.upper[i]))
+            for (const auto& p : t.trace) {
+                for (std::size_t i = 0; i < n; ++i) {
+                    const std::optional<double>& lo = b.lower[i];
+                    const std::optional<double>& hi = b.upper[i];
+                    if ((lo.has_value() && p.x[i] == *lo) || (hi.has_value() && p.x[i] == *hi))
                         ++on_bound_points;
+                }
+            }
             ++runs;
         }
     }

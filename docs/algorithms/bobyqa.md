@@ -239,7 +239,9 @@ pinned one by one.
 On the report's test problem (7.1), five instances drawn as the report
 describes, the evaluation counts at `rho_beg = 0.1` and `rho_end = 1e-6`
 stay within a quarter of the greatest count of each row of its Tables 1 to 3,
-and the accuracy within the greatest of the tables. On my instances the counts are
+and the accuracy within three times the greatest of the tables (the error in `x`
+is not bounded by `rho_end` on this problem, and varies with the rounding of the
+platform). On my instances the counts are
 201 to 316 at `n = 10` and 560 to 709 at `n = 20` with `m = 2n + 1`,
 against the report's 302 to 427 and 691 to 927 for its own five instances.
 
