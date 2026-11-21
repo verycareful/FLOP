@@ -180,7 +180,7 @@ while they were written, and await the tests that pin them:
   the model update (5.12).
 
 On the report's test problem (7.1), five random instances, the evaluation
-counts are 204 to 334 at `n = 10` and 542 to 705 at `n = 20`, against the
+counts are 201 to 316 at `n = 10` and 560 to 709 at `n = 20`, against the
 report's 302 to 427 and 691 to 927 for its own five instances.
 
 ## Limits

@@ -7,6 +7,72 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.2.0] - 2026-11-21 13:28 IST
+
+The third algorithm: BOBYQA, written from Powell's report DAMTP 2009/NA06,
+behind the same interface and facade as COBYLA and Nelder-Mead, for
+problems with box bounds. Its test suite is the 0.1.2.1 release; the rules
+still to be read against the report's text are listed on the algorithm
+page. On the benchmark rows the optimizer's own time per evaluation is 0.50
+to 0.92 of NLopt 2.7.1's.
+
+### Added
+
+- `flop::bobyqa::minimize` and `minimize_batch`: the method of the report,
+  with its quadratic model updated by least Frobenius norm changes,
+  TRSBOX for the trust-region step, ALTMOV for the alternative iteration,
+  RESCUE for the loss of conditioning, and the shifts of origin of its
+  section 6. The model and the inverse matrix are held in the factored
+  form of its section 4, so an iteration costs O(m^2) beyond its
+  evaluation, with m the number of interpolation points.
+- Box bounds are exact. A coordinate a step puts on a bound takes the
+  bound's own value, so no point is a rounding error away from a bound and
+  none is outside the box. A coordinate without a bound has no constraint
+  there; I do not stand in the report's `1e60` for it.
+- `bobyqa::Options`: `final_trust_radius` (the report's `rhoend`),
+  `interpolation_points` (`2n + 1` by default), `shrink_initial_step`,
+  which lowers the first radius to fit a box narrower than twice the first
+  step instead of throwing, and `newuoa_weight`. The weight that chooses
+  which point a step replaces is NEWUOA's (equation (7.5) of Powell's 2006
+  paper) by default, because the report's (6.1) needs about a third more
+  evaluations on the report's own test problem, five random instances each
+  at 10 and 20 parameters: 5958 against 4542. NLopt 2.7.1 takes 4855.
+  `newuoa_weight = false` selects the report's weight.
+- The batch channel carries the first `min(m, 2n + 1)` starting points as
+  one call with `x0` first, the rest of the starting points as a second,
+  and the new points of a RESCUE as one call per run of consecutive slots.
+  The scalar and the batch channels run the same trajectory.
+- `flop::Minimizer::create("BOBYQA")` and `set_interpolation_points`,
+  `set_shrink_initial_step` and `set_newuoa_weight`; `set_final_trust_radius`
+  now serves BOBYQA as well as COBYLA.
+- Each sum in the model, the inverse matrix and the origin shift is a
+  dependency chain that strict floating point cannot reorder, so the loops
+  over the rows of the matrices and the points take four independent rows
+  together and every sum still adds its terms in the order it did before.
+  Over 428 runs, every evaluated point and value is the same bits as with
+  one row at a time, on GCC 16, GCC 14 and clang 23 at `-O2` and `-O3`.
+  `bench_bobyqa` times the unbounded, boxed and active box rows from 2 to
+  128 parameters against NLopt 2.7.1's numbers on the same rows, which its
+  header carries, and runs in CI as a smoke test. On an AMD Ryzen 9 7900X
+  the time per evaluation is 0.50 to 0.92 of NLopt's on every row; at 128
+  parameters unbounded it is 36 against 69 microseconds, and on the active
+  box row at 64 parameters 30 against 35.
+- Documentation: `docs/algorithms/bobyqa.md`, naming every deviation from
+  the report and every rule still to be verified against its text, and
+  `docs/api/bobyqa.md`.
+
+### Changed
+
+- `Minimizer::names()` lists three algorithms: `BOBYQA`, `COBYLA` and
+  `NELDER_MEAD`.
+- The constrained overloads throw `std::invalid_argument` for `BOBYQA`
+  before any evaluation, as they do for `NELDER_MEAD`, and one refusal
+  serves both.
+
+### Results
+
+306 tests across 31 suites, all passed in both binaries, strict and -ffast-math (2.9 to 3.3 s per binary, Linux x86-64; GCC 16.2.1, GCC 14.3.1, clang 23.1.5, and GCC 16.2.1 with the library under -ffast-math).
+
 ## [0.1.1.3] - 2026-11-04 00:45 IST
 
 Nelder-Mead with its minimiser on a face of the box. Measuring the method

@@ -1,16 +1,14 @@
 # FLOP
-<!-- Language and build -->
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?logo=cplusplus&logoColor=white)](https://en.cppreference.com/w/cpp/23)
 [![CMake](https://img.shields.io/badge/CMake-3.25%2B-064F8C?logo=cmake&logoColor=white)](https://cmake.org/)
-<!-- Test and benchmark -->
 [![GoogleTest](https://img.shields.io/badge/GoogleTest-1.14.0-4285F4?logo=google&logoColor=white)](https://github.com/google/googletest)
-[![Google Benchmark](https://img.shields.io/badge/Google%20Benchmark-1.8.3-4285F4)](https://github.com/google/benchmark) <!-- no shields.io logo for Google Benchmark; swap one in if it appears -->
-<!-- CI -->
+[![Google Benchmark](https://img.shields.io/badge/Google%20Benchmark-1.8.3-4285F4)](https://github.com/google/benchmark)
 [![CI](https://github.com/verycareful/FLOP/actions/workflows/ci.yml/badge.svg)](https://github.com/verycareful/FLOP/actions/workflows/ci.yml)
-<!-- Release -->
-[![Version](https://img.shields.io/badge/version-0.1.1.3-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.2.0-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-brightgreen)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Early%20Development-orange)](https://github.com/verycareful/FLOP)
+
+<!-- Plain badge: Google Benchmark has no shields.io logo; swap one in if it appears. -->
 
 Fast Library of Optimization Procedures: derivative-free optimizers for
 objectives that are expensive to evaluate, written in C++23 from the
