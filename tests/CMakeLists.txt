@@ -59,6 +59,12 @@ FetchContent_MakeAvailable(googletest)
 #   shrink         a shrink that moves some vertices or none; the radius after one
 #   ladder         when the ladder runs, its bottom rung, both channels through it
 #
+# BOBYQA (test_v0121_*.cpp; v0121_problems.hpp holds what they share):
+#   validation     every std::invalid_argument, and the mid-run runtime_error
+#   options        interpolation_points, shrink_initial_step, the callback
+#   range          the coordinate range: refusals at entry, no non-finite point
+#   tolerance      FtolReached at the ends of the finite range
+#
 # Both:
 #   range          the coordinate range: refusals at entry, the error at run time
 #   tolerance      the f tolerance tests at the ends of the finite range
@@ -93,6 +99,10 @@ set(FLOP_TEST_SOURCES
     test_v0112_range.cpp
     test_v0112_tolerance.cpp
     test_v0113_active_set.cpp
+    test_v0121_validation.cpp
+    test_v0121_options.cpp
+    test_v0121_range.cpp
+    test_v0121_tolerance.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines
