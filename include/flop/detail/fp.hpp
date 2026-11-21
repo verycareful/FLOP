@@ -39,16 +39,24 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 
 namespace flop::detail {
+
+// The position of the exponent field of a binary64 (the bits of the
+// significand lie below it) and of its sign bit. Unsigned, so that the shifts
+// below have no signed operand.
+constexpr unsigned kExponentShift = static_cast<unsigned>(std::numeric_limits<double>::digits - 1);
+constexpr unsigned kSignShift =
+    static_cast<unsigned>(std::numeric_limits<std::uint64_t>::digits - 1);
 
 // True if x is NaN or an infinity: the binary64 exponent field is all ones for
 // those and nothing else.
 constexpr bool fp_bad(const double& x) noexcept {
     static_assert(sizeof(double) == sizeof(std::uint64_t), "fp_bad assumes IEEE-754 binary64");
     const auto bits = std::bit_cast<std::uint64_t>(x);
-    return ((bits >> 52) & UINT64_C(0x7FF)) == UINT64_C(0x7FF);
+    return ((bits >> kExponentShift) & UINT64_C(0x7FF)) == UINT64_C(0x7FF);
 }
 
 // True if any element of v is non-finite.
@@ -65,7 +73,7 @@ constexpr bool any_bad(std::span<const double> v) noexcept {
 // comparison written to remove it is subject to the same freedom; the
 // integer test on the bits is not.
 constexpr void drop_negative_zero(double& x) noexcept {
-    if (std::bit_cast<std::uint64_t>(x) == (UINT64_C(1) << 63)) x = 0.0;
+    if (std::bit_cast<std::uint64_t>(x) == (UINT64_C(1) << kSignShift)) x = 0.0;
 }
 
 }  // namespace flop::detail
