@@ -118,10 +118,22 @@ inline void validate_nelder_mead_range(const char* where, const Options& o,
     }
 }
 
+// Whether the half-width of [lo, hi] is below h, that is hi/2 - lo/2 < h, for
+// finite lo <= hi and h > 0. A box can be wider than the largest double, so
+// hi - lo may not exist, and -ffast-math regroups 0.5 hi - 0.5 lo into
+// 0.5 (hi - lo), which overflows before the halving. Every expression below
+// stays finite however it is grouped: with lo and hi of one sign the
+// difference is no larger than the larger of the two, and with opposite signs
+// the test is -lo/2 < h - hi/2, where h - hi/2 lies in [-max/2, max].
+inline bool half_width_below(double lo, double hi, double h) {
+    if (lo >= 0.0 || hi <= 0.0) return 0.5 * hi - 0.5 * lo < h;
+    return -0.5 * lo < h - 0.5 * hi;
+}
+
 // BOBYQA's own input rules, after validate_options. The number of
 // interpolation points m is in [n + 2, (n + 1)(n + 2) / 2] (the report's
 // section 1); 0 selects 2n + 1. A coordinate bounded on both sides needs
-// b_i - a_i >= 2 initial_step (2.1), compared as b/2 - a/2 >= h so that
+// b_i - a_i >= 2 initial_step (2.1), compared by half_width_below so that
 // the width cannot overflow, unless the caller asked for the step to
 // shrink. A fixed coordinate (a_i = b_i) is refused by validate_bounds.
 template <class BobyqaOptions>
@@ -139,7 +151,7 @@ void validate_bobyqa(const char* where, const BobyqaOptions& o, std::span<const 
     for (std::size_t i = 0; i < n; ++i) {
         const std::optional<double>& lo = o.bounds->lower[i];
         const std::optional<double>& hi = o.bounds->upper[i];
-        if (lo.has_value() && hi.has_value() && 0.5 * *hi - 0.5 * *lo < o.initial_step)
+        if (lo.has_value() && hi.has_value() && half_width_below(*lo, *hi, o.initial_step))
             fail(where, "the bounds at coordinate " + std::to_string(i) +
                             " are closer than 2 * initial_step (set shrink_initial_step to "
                             "shrink the step to fit)");
