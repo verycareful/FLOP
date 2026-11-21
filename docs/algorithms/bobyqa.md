@@ -92,6 +92,16 @@ costs `O(m^2)` beyond its evaluation, and a shift of origin `O(m^2 n)`.
   bound whose model gradient is rounding noise steps by about that much. So
   no point is a rounding error away from a bound it should be on, and none
   is outside the box.
+- **The scale of the model in TRSBOX.** The method forms `|g|^2`, `s^T H s`
+  (about `|g|^2 |H|`) and the square of the reduction, which leave the range
+  of a double for an objective multiplied by about `1e100` or more, or `1e-100`
+  or less; a step that is zero because `|g|^2` overflowed or underflowed ends
+  the run far from the minimiser. When the largest component of `g` is beyond
+  `2^102` or below `2^-102`, FLOP runs TRSBOX on `g` and `H` multiplied by a
+  power of two that brings that component into `[1, 2)`, and scales the
+  reduction, the curvature and the gradient back. A power of two changes no
+  rounding, so the step is the one the unscaled arithmetic would give with
+  unbounded range, and inside the range nothing is scaled.
 - **TRSBOX's search round the boundary.** The report finds `theta_B` and
   `theta_Q` "approximately". FLOP computes `theta_B` in closed form: each
   coordinate of `d(theta)` is a sinusoid, which reaches a bound at
@@ -224,10 +234,8 @@ against the report's 302 to 427 and 691 to 927 for its own five instances.
   `MaxEvaluationsReached`. Whether it does depends on the rounding of the
   objective and the compiler.
 - A first step above about `1.3e154`, the square root of the largest double,
-  can hand the objective a NaN coordinate, and an objective multiplied by
-  `1e140` or more, or by `1e-200` or less, can end with `XtolReached` far
-  from the minimiser; powers of two change nothing in the run. An unbounded
-  objective can fail to end under `-ffast-math`.
+  can hand the objective a NaN coordinate. An unbounded objective can fail
+  to end under `-ffast-math`.
 - Storage is `O(m^2 + m n + n^2)`: at `m = (n + 1)(n + 2) / 2` that is
   `O(n^4)`.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

@@ -40,6 +40,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -57,6 +58,10 @@ constexpr double kCgStop = 0.01;
 constexpr double kArcStop = 1e-4;
 // The samples of dQ/dtheta along the arc (see the header).
 constexpr std::size_t kArcSamples = 16;
+// The binary exponent of the largest gradient component beyond which the
+// model is scaled: a tenth of the exponent range, so that the cube of the
+// gradient, the largest power the method forms, stays inside it.
+constexpr int kScaleExponent = std::numeric_limits<double>::max_exponent / 10;
 
 // The workspace, in two allocations: six vectors of n doubles cut from one
 // buffer, and the free flags. Not copyable, since the spans point into the
@@ -127,17 +132,26 @@ double first_root(G g, double top) {
 
 }  // namespace trsbox_detail
 
-// d (out) is the step from x_k = model.xopt(), side (out) says which
-// coordinates of x_k + d are on a bound, gd (out) is grad Q(x_k + d).
-inline TrsboxResult trsbox(const Model& model, const Box& box, double delta, std::span<double> d,
-                           std::span<Side> side, std::span<double> gd, TrsboxWork& w) {
+namespace trsbox_detail {
+
+// The method of the header on the model with its gradient and Hessian
+// multiplied by 2^-e, an exact scaling: qred, curvature and gd come back in
+// those units. e is 0 for a model that needs no scaling.
+inline TrsboxResult run(const Model& model, const Box& box, double delta, std::span<double> d,
+                        std::span<Side> side, std::span<double> gd, TrsboxWork& w, int e) {
     const std::size_t n = model.n;
     std::span<const double> xk = model.xopt();
     TrsboxResult out;
     std::size_t nfree = 0;
+    // H s in the scaled units.
+    const auto hmul = [&](std::span<const double> v, std::span<double> hv) {
+        model.hess_mul(v, hv);
+        if (e != 0)
+            for (std::size_t i = 0; i < n; ++i) hv[i] = std::ldexp(hv[i], -e);
+    };
     for (std::size_t i = 0; i < n; ++i) {
         d[i] = 0.0;
-        gd[i] = model.g[i];
+        gd[i] = e != 0 ? std::ldexp(model.g[i], -e) : model.g[i];
         side[i] = Side::Free;
         if (box.at_lo(i, xk[i]) && model.g[i] >= 0.0) side[i] = Side::Lower;
         if (box.at_hi(i, xk[i]) && model.g[i] <= 0.0) side[i] = Side::Upper;
@@ -169,7 +183,7 @@ inline TrsboxResult trsbox(const Model& model, const Box& box, double delta, std
         if (!(ss > 0.0)) return out;
         const double gs = dot(gd, w.s);
         if (!(gs < 0.0)) return out;
-        model.hess_mul(w.s, w.hs);
+        hmul(w.s, w.hs);
         const double shs = dot(w.s, w.hs);
 
         // alpha_Delta: |d + alpha s| = Delta, the positive root.
@@ -264,8 +278,8 @@ inline TrsboxResult trsbox(const Model& model, const Box& box, double delta, std
         if (temp <= kArcStop * qred * qred || !(temp > 0.0)) return out;
         const double root = std::sqrt(temp);
         for (std::size_t i = 0; i < n; ++i) w.s[i] = (pdg * w.pd[i] - pdd * w.pg[i]) / root;
-        model.hess_mul(w.pd, w.hpd);
-        model.hess_mul(w.s, w.hs);
+        hmul(w.pd, w.hpd);
+        hmul(w.s, w.hs);
         const double a1 = pdg, b1 = dot(gd, w.s);
         const double qa = dot(w.pd, w.hpd), qb = dot(w.pd, w.hs), qc = dot(w.s, w.hs);
         // f(theta) = Q(x_k + d(theta)) - Q(x_k + d) and its derivative.
@@ -366,6 +380,39 @@ inline TrsboxResult trsbox(const Model& model, const Box& box, double delta, std
         }
         if (red <= kCgStop * qred) return out;
     }
+}
+
+}  // namespace trsbox_detail
+
+// d (out) is the step from x_k = model.xopt(), side (out) says which
+// coordinates of x_k + d are on a bound, gd (out) is grad Q(x_k + d).
+//
+// The method forms |g|^2, s^T H s (about |g|^2 |H|, cubic in the scale of the
+// objective) and qred^2, which leave the range of a double for an objective
+// multiplied by about 1e100 or more, or 1e-100 or less, and a step that is
+// zero because |g|^2 overflowed or underflowed ends the run far from the
+// minimiser. Past kScaleExponent binary orders of magnitude in the largest
+// gradient component the model is therefore multiplied by 2^-e, which brings
+// that component into [1, 2): a power of two changes no rounding, so the
+// step is what the unscaled arithmetic would give with unbounded range, and
+// qred, the curvature and gd are scaled back. Inside the range nothing is
+// scaled and the arithmetic is untouched.
+inline TrsboxResult trsbox(const Model& model, const Box& box, double delta, std::span<double> d,
+                           std::span<Side> side, std::span<double> gd, TrsboxWork& w) {
+    double gmax = 0.0;
+    for (std::size_t i = 0; i < model.n; ++i) gmax = std::max(gmax, std::fabs(model.g[i]));
+    int e = 0;
+    if (gmax > 0.0) {
+        const int exponent = std::ilogb(gmax);
+        if (exponent > kScaleExponent || exponent < -kScaleExponent) e = exponent;
+    }
+    TrsboxResult out = trsbox_detail::run(model, box, delta, d, side, gd, w, e);
+    if (e != 0) {
+        out.qred = std::ldexp(out.qred, e);
+        out.curvature = std::ldexp(out.curvature, e);
+        for (std::size_t i = 0; i < model.n; ++i) gd[i] = std::ldexp(gd[i], e);
+    }
+    return out;
 }
 
 }  // namespace flop::detail::bobyqa
