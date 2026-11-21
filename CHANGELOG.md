@@ -7,6 +7,92 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.2.2] - 2026-11-21 19:40 IST
+
+The fixes for the eight things the 0.1.2.1 tests found. Every test that was
+pinned red passes in every binary on every tree. Two of the causes turned out
+to be wider than the tests that found them, so there are two behaviours to
+report: a first radius beyond the range of the model's arithmetic is now
+refused, and a run whose model has left the range of a double now ends with
+`RoundoffLimited`.
+
+### Fixed
+
+- With a scalar objective, the starting points were all evaluated after one of
+  them met `stop_value`. The run now ends at the point that meets it. A batch
+  call is still evaluated whole.
+- A NaN or infinity that a batch call wrote into memory went unnoticed under
+  clang with -ffast-math, because `Solver::record` took the value by value.
+  It now reads it from memory, as the Nelder-Mead and COBYLA solvers do.
+- The test of a box's width against the first step, `b/2 - a/2 < h`, was
+  regrouped by -ffast-math into `(b - a)/2`, which overflows for a box wider
+  than the largest double. It is now written so that no grouping overflows.
+- A point a rounding error inside a bound it should be on. Where `x0` is moved
+  to `Delta` inside a bound, the bound is now exactly `Delta` away as an
+  offset, so `x0 - Delta e_i` is the bound itself. A point within four units in
+  the last place of a bound takes the bound's own value.
+- A run that reported `XtolReached` from a point 0.19 from the minimiser when
+  the objective was multiplied by 1e140 or more, or by 1e-200 or less. TRSBOX
+  forms the square of the gradient and products of three of its factors, which
+  overflowed or underflowed, and the first step was zero. It now runs on a
+  model scaled by a power of two when the gradient is beyond a binary exponent
+  of 102, which changes no rounding, and scales the results back. Every scale I
+  tried, from 1e-300 to 1e300, reaches the minimiser, including 1e-100 and
+  1e-150, which ended with `RoundoffLimited` after seven evaluations.
+- A run that never ended. An objective that falls without bound doubles the
+  trust region at every step, and the matrices of the model, which hold terms
+  of the size of the fourth power of the distances between the interpolation
+  points, overflow near `DBL_MAX^(1/4)`. Two finite objective values that
+  differ by more than the largest double did the same at the first iteration.
+  The run ended only through a comparison with NaN, which -ffast-math folds
+  away, and looped. The radii, the model gradient and the model's multipliers
+  are now read from memory before every iteration, and a value that is not
+  finite ends the run with `RoundoffLimited`.
+- A first radius beyond about 1.3e154 handed the objective a NaN coordinate. It
+  is now refused at entry; see Changed.
+
+### Changed
+
+- BOBYQA refuses a first radius above `DBL_MAX^(1/4) / (4 n^2)` with
+  `std::invalid_argument`, after `shrink_initial_step` has been applied; that
+  is about 3e76 for one variable. I measured the factor: a run at the first
+  radius `s` was held against the same run on an objective scaled by a power
+  of two, which changes no rounding, and for `n` up to 200 and every number of
+  points none stayed identical beyond `DBL_MAX^(1/4) / (1.14 n^2)`; the limit
+  is 3.5 times below that. A radius below about 1e-69 ends early with
+  `RoundoffLimited` and is not refused.
+- An objective unbounded below ends with `RoundoffLimited` when the model's
+  arithmetic overflows, near 1e77, under every compiler and model; under
+  -ffast-math it used to loop.
+- `docs/algorithms/bobyqa.md` extends its deviation on points on a bound and
+  lists two more from the report, the scale of the model in TRSBOX and the
+  range limit; the Limits these fixes removed are gone. `docs/api/bobyqa.md` states the
+  limit and the new end of an unbounded run.
+- The two shifts in the bit tests of `flop/detail/fp.hpp` have unsigned counts,
+  named from `std::numeric_limits`; clang-tidy 23 flagged the literals. The
+  bits tested are the same.
+
+### Tests
+
+- A falling objective ends with `RoundoffLimited`, with every coordinate below
+  `16 DBL_MAX^(1/4)`, for one to four variables and both channels.
+- The first radius is accepted at its limit and refused one spacing beyond it
+  and at twice it, for one, two, three, five and twenty variables, through
+  every entry point; `shrink_initial_step` brings a step beyond the limit
+  into it through a narrow box and not through a wide one.
+- The tests that accepted a first step of half the largest double, and that
+  ran one of 1e100, now expect the refusal; the tiny-scale test runs a step
+  inside the limit and one beyond it. The comments of the tests that were red
+  say what the tests hold.
+
+### Results
+
+440 tests across 49 suites, all passed in both binaries, strict and
+-ffast-math (3.8 s strict, 3.4 s -ffast-math on GCC, Linux x86-64; GCC 16.2.1,
+GCC 14.3.1, clang 23.1.5, and GCC 16.2.1 with the library under -ffast-math).
+Three tests skip by design in the clang -ffast-math binary: they hand the
+library a NaN by value, which that compiler treats as undefined.
+
 ## [0.1.2.1] - 2026-11-21 15:56 IST
 
 The test release for BOBYQA. BOBYQA shipped in 0.1.2.0 with no tests, so this
