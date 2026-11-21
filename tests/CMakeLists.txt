@@ -68,6 +68,9 @@ FetchContent_MakeAvailable(googletest)
 #   inverse        H = W^-1: its start (2.11)-(2.15), update (4.9)-(4.14), shift (6.14)-(6.16),
 #                  each against the explicit inverse of W; v0121_reference.hpp
 #   model          the matrix (4.6), the move into M, the shift (6.17), the update of section 4
+#   trsbox         section 3: (3.3), the line search, (3.4), (3.5), the arc (3.6), closed forms
+#   altmov         section 3: the line step (3.11), the Cauchy step (3.13)-(3.15), vs an
+#                  independent computation from the explicit Lagrange function
 #
 # Both:
 #   range          the coordinate range: refusals at entry, the error at run time
@@ -110,6 +113,8 @@ set(FLOP_TEST_SOURCES
     test_v0121_start.cpp
     test_v0121_inverse.cpp
     test_v0121_model.cpp
+    test_v0121_trsbox.cpp
+    test_v0121_altmov.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines
