@@ -144,9 +144,16 @@ TEST(V0101Facade, AMinimizerIsMovable) {
     EXPECT_EQ(c.name(), std::string_view("COBYLA"));
 }
 
-TEST(V0101Facade, TheVersionIsTheFourComponentLabel) {
+// A release is labelled with four components; a commit built on the way to it
+// carries a fifth, the index of the commit. Either has digits between every
+// pair of dots.
+TEST(V0101Facade, TheVersionIsAFourOrFiveComponentLabel) {
     const std::string_view v = flop::version();
-    EXPECT_EQ(std::ranges::count(v, '.'), 3);
+    const std::ptrdiff_t dots = std::ranges::count(v, '.');
+    EXPECT_TRUE(dots == 3 || dots == 4) << v;
     EXPECT_FALSE(v.empty());
+    EXPECT_NE(v.front(), '.');
+    EXPECT_NE(v.back(), '.');
+    EXPECT_EQ(v.find(".."), std::string_view::npos) << v;
     for (const char ch : v) EXPECT_TRUE((ch >= '0' && ch <= '9') || ch == '.') << ch;
 }
