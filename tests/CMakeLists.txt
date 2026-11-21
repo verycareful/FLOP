@@ -71,6 +71,10 @@ FetchContent_MakeAvailable(googletest)
 #   trsbox         section 3: (3.3), the line search, (3.4), (3.5), the arc (3.6), closed forms
 #   altmov         section 3: the line step (3.11), the Cauchy step (3.13)-(3.15), vs an
 #                  independent computation from the explicit Lagrange function
+#   control        section 6 through runs whose trace shows the rule: (6.4) doubling and
+#                  halving, the short step of (6.5), (6.6) ending at rho_end, (6.13)
+#   rescue         section 5: (5.4) and (5.5), the iteration of (5.6) and (5.7) written out
+#                  again, the inverse left behind, (5.3) and (5.12)
 #
 # Both:
 #   range          the coordinate range: refusals at entry, the error at run time
@@ -115,6 +119,8 @@ set(FLOP_TEST_SOURCES
     test_v0121_model.cpp
     test_v0121_trsbox.cpp
     test_v0121_altmov.cpp
+    test_v0121_control.cpp
+    test_v0121_rescue.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines

@@ -194,44 +194,7 @@ TEST(V0121Model, MovingTheOriginKeepsTheSecondDerivativeMatrix) {
         }
 }
 
-namespace {
-
-// The explicit quadratic of the report, c + g.x + (1/2) x^T G x about the
-// origin, updated by (4.3) from the columns of the explicit H.
-struct Explicit {
-    double c = 0.0;
-    std::vector<double> g;
-    Dense big;
-    explicit Explicit(std::size_t n) : g(n, 0.0), big(n) {}
-    [[nodiscard]] double at(std::span<const double> x) const {
-        double s = c;
-        for (std::size_t i = 0; i < g.size(); ++i) {
-            s += g[i] * x[i];
-            for (std::size_t k = 0; k < g.size(); ++k) s += 0.5 * x[i] * big(i, k) * x[k];
-        }
-        return s;
-    }
-    [[nodiscard]] std::vector<double> gradient(std::span<const double> x) const {
-        std::vector<double> r(g);
-        for (std::size_t i = 0; i < g.size(); ++i)
-            for (std::size_t k = 0; k < g.size(); ++k) r[i] += big(i, k) * x[k];
-        return r;
-    }
-};
-
-// Q = c + g.x + (1/2) sum_l lambda_l (y_l.x)^2 added to the explicit model,
-// (lambda, c, g) being the scaled column t of h: the change (4.3).
-void add_change(Explicit& q, const Dense& h, const Points& y, std::size_t n, std::size_t m,
-                std::size_t t, double scale) {
-    q.c += scale * h(m, t);
-    for (std::size_t k = 0; k < n; ++k) q.g[k] += scale * h(m + 1 + k, t);
-    for (std::size_t l = 0; l < m; ++l)
-        for (std::size_t i = 0; i < n; ++i)
-            for (std::size_t k = 0; k < n; ++k)
-                q.big(i, k) += scale * h(l, t) * y[l * n + i] * y[l * n + k];
-}
-
-}  // namespace
+namespace {}  // namespace
 
 TEST(V0121Model, TheUpdateOfSection4InterpolatesAndMatchesTheExplicitUpdate) {
     // Start from the least Frobenius norm interpolant of the starting points,
@@ -258,20 +221,9 @@ TEST(V0121Model, TheUpdateOfSection4InterpolatesAndMatchesTheExplicitUpdate) {
             inv.set_coordinate(alpha, beta);
 
             // The first model: the explicit least-norm interpolant.
-            Explicit ex(n);
-            {
-                const Dense h = v0121::explicit_h(y, n, m);
-                std::vector<double> r(m + n + 1, 0.0);
-                for (std::size_t j = 0; j < m; ++j) r[j] = q.fval[j];
-                const std::vector<double> sol = v0121::times(h, r);
-                ex.c = sol[m];
-                for (std::size_t k = 0; k < n; ++k) ex.g[k] = sol[m + 1 + k];
-                for (std::size_t l = 0; l < m; ++l)
-                    for (std::size_t i = 0; i < n; ++i)
-                        for (std::size_t k = 0; k < n; ++k)
-                            ex.big(i, k) += sol[l] * y[l * n + i] * y[l * n + k];
-                for (std::size_t l = 0; l < m; ++l) q.mu[l] = sol[l];
-            }
+            std::vector<double> lambda0;
+            v0121::Quadratic ex = v0121::least_norm_interpolant(y, n, m, q.fval, lambda0);
+            for (std::size_t l = 0; l < m; ++l) q.mu[l] = lambda0[l];
             q.kopt = 0;
             for (std::size_t j = 1; j < m; ++j)
                 if (q.fval[j] < q.fval[q.kopt]) q.kopt = j;
@@ -337,7 +289,7 @@ TEST(V0121Model, TheUpdateOfSection4InterpolatesAndMatchesTheExplicitUpdate) {
                 std::ranges::copy(x, y.begin() + static_cast<std::ptrdiff_t>(t * n));
                 const Dense hnew = v0121::explicit_h(y, n, m);
                 ASSERT_EQ(hnew.size, m + n + 1);
-                add_change(ex, hnew, y, n, m, t, diff);
+                v0121::add_change(ex, hnew, y, n, m, t, diff);
 
                 // Interpolation at every point, to rounding.
                 double spread = 1.0;

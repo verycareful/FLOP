@@ -210,6 +210,59 @@ inline double dot_all(const std::vector<double>& a, const std::vector<double>& b
     return s;
 }
 
+// The explicit quadratic of the report, c + g.x + (1/2) x^T G x about the
+// origin, updated by (4.3) from the columns of an explicit H.
+struct Quadratic {
+    double c = 0.0;
+    std::vector<double> g;
+    Dense big;
+    explicit Quadratic(std::size_t n) : g(n, 0.0), big(n) {}
+    [[nodiscard]] double at(std::span<const double> x) const {
+        double s = c;
+        for (std::size_t i = 0; i < g.size(); ++i) {
+            s += g[i] * x[i];
+            for (std::size_t k = 0; k < g.size(); ++k) s += 0.5 * x[i] * big(i, k) * x[k];
+        }
+        return s;
+    }
+    [[nodiscard]] std::vector<double> gradient(std::span<const double> x) const {
+        std::vector<double> r(g);
+        for (std::size_t i = 0; i < g.size(); ++i)
+            for (std::size_t k = 0; k < g.size(); ++k) r[i] += big(i, k) * x[k];
+        return r;
+    }
+};
+
+// Q gains scale * (c + g.x + (1/2) sum_l lambda_l (y_l.x)^2), (lambda, c, g)
+// being column t of h: the change (4.3), and with scale = F(x+) - Q(x+) the
+// change (5.12) when t is a new point.
+inline void add_change(Quadratic& q, const Dense& h, const Points& y, std::size_t n, std::size_t m,
+                       std::size_t t, double scale) {
+    q.c += scale * h(m, t);
+    for (std::size_t k = 0; k < n; ++k) q.g[k] += scale * h(m + 1 + k, t);
+    for (std::size_t l = 0; l < m; ++l)
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t k = 0; k < n; ++k)
+                q.big(i, k) += scale * h(l, t) * y[l * n + i] * y[l * n + k];
+}
+
+// The least Frobenius norm quadratic through (y_j, f_j): (lambda, c, g) = H (f, 0).
+inline Quadratic least_norm_interpolant(const Points& y, std::size_t n, std::size_t m,
+                                        std::span<const double> f, std::vector<double>& lambda) {
+    const Dense h = explicit_h(y, n, m);
+    std::vector<double> r(m + n + 1, 0.0);
+    for (std::size_t j = 0; j < m; ++j) r[j] = f[j];
+    const std::vector<double> sol = times(h, r);
+    Quadratic q(n);
+    q.c = sol[m];
+    for (std::size_t k = 0; k < n; ++k) q.g[k] = sol[m + 1 + k];
+    lambda.assign(sol.begin(), sol.begin() + static_cast<std::ptrdiff_t>(m));
+    for (std::size_t l = 0; l < m; ++l)
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t k = 0; k < n; ++k) q.big(i, k) += sol[l] * y[l * n + i] * y[l * n + k];
+    return q;
+}
+
 // The multiplier pairs of the coordinate points for a run of the starting
 // procedure: alpha_i = delta and beta_i = -delta on an interior coordinate,
 // delta and 2 delta on a lower bound, -delta and -2 delta on an upper one.
