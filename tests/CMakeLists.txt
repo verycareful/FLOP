@@ -64,6 +64,10 @@ FetchContent_MakeAvailable(googletest)
 #   options        interpolation_points, shrink_initial_step, the callback
 #   range          the coordinate range: refusals at entry, no non-finite point
 #   tolerance      FtolReached at the ends of the finite range
+#   start          section 2: the points (2.2) to (2.4), the swap, the first model (2.5)
+#   inverse        H = W^-1: its start (2.11)-(2.15), update (4.9)-(4.14), shift (6.14)-(6.16),
+#                  each against the explicit inverse of W; v0121_reference.hpp
+#   model          the matrix (4.6), the move into M, the shift (6.17), the update of section 4
 #
 # Both:
 #   range          the coordinate range: refusals at entry, the error at run time
@@ -103,6 +107,9 @@ set(FLOP_TEST_SOURCES
     test_v0121_options.cpp
     test_v0121_range.cpp
     test_v0121_tolerance.cpp
+    test_v0121_start.cpp
+    test_v0121_inverse.cpp
+    test_v0121_model.cpp
 )
 
 # extra_defs: definitions specific to one variant. The fast variant defines
