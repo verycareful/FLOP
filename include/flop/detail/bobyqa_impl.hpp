@@ -278,7 +278,10 @@ private:
         }
     }
 
-    void record(std::span<const double> x, double f) {
+    // f is read from the memory the objective wrote, never from a copy: a
+    // double taken by value is, to clang under -ffinite-math-only, already
+    // free of NaN and infinity, and fp_bad would be folded away.
+    void record(std::span<const double> x, const double& f) {
         if (fp_bad(f))
             throw std::runtime_error("flop::bobyqa: the objective returned a non-finite value");
         ++evals_;

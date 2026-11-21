@@ -229,5 +229,6 @@ against the report's 302 to 427 and 691 to 927 for its own five instances.
   objective returns may never reach the check. Clang declares every
   `double` a function returns or takes by value free of NaN and infinity,
   so such a value is undefined before FLOP sees it; GCC keeps the bits and
-  the check catches them. `x0`, the bounds and the tolerances are read from
-  memory and are caught under every compiler and model.
+  the check catches them. `x0`, the bounds, the tolerances and the values a
+  batch call of more than one point writes are read from memory and are
+  caught under every compiler and model.
