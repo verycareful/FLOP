@@ -135,7 +135,16 @@ costs `O(m^2)` beyond its evaluation, and a shift of origin `O(m^2 n)`.
   definition agrees with it for every `m` with `n <= 5`.
 - **Error returns.** The report's two error returns, a predicted reduction
   that is not positive in (6.3) and a second RESCUE in one iteration that
-  would change nothing, end the run with `RoundoffLimited`.
+  would change nothing, end the run with `RoundoffLimited`. So does a model
+  that is not numbers: after every iteration FLOP reads `rho`, `Delta`, the
+  model gradient and the `mu_l` from memory, and one that is not finite ends
+  the run. The matrices of the model hold terms of the size of the fourth
+  power of the distances between the interpolation points, so an objective
+  that falls without bound, with `Delta` doubling at every step by (6.4),
+  overflows them at distances near `DBL_MAX^(1/4)`, about `1e77`, long
+  before a coordinate does. Two finite values of the objective that differ
+  by more than the largest double end it the same way, at the first
+  iteration.
 - **Stopping rules beyond `rho`.** The report stops at `rhoend` or the
   evaluation cap. FLOP also stops on `stop_value` after every evaluation,
   and with `FtolReached` when a step that lowers the best value lowers it by
@@ -174,7 +183,7 @@ reaching the caller's own `rhoend` is `XtolReached`.
 | `FtolReached` | a step that lowered the best value lowered it by at most the f tolerance |
 | `StopValueReached` | an evaluation returned `f <= stop_value` |
 | `MaxEvaluationsReached` | the cap |
-| `RoundoffLimited` | `rho` reached the precision floor, or one of the report's error returns |
+| `RoundoffLimited` | `rho` reached the precision floor, one of the report's error returns, or the model's arithmetic left the range of a double |
 
 Whatever the status, the result is the best point evaluated, and
 `Result::final_radius` is `rho` at the end.
@@ -234,8 +243,7 @@ against the report's 302 to 427 and 691 to 927 for its own five instances.
   `MaxEvaluationsReached`. Whether it does depends on the rounding of the
   objective and the compiler.
 - A first step above about `1.3e154`, the square root of the largest double,
-  can hand the objective a NaN coordinate. An unbounded objective can fail
-  to end under `-ffast-math`.
+  can hand the objective a NaN coordinate.
 - Storage is `O(m^2 + m n + n^2)`: at `m = (n + 1)(n + 2) / 2` that is
   `O(n^4)`.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

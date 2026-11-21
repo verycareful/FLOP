@@ -239,6 +239,10 @@ public:
         initialize();
         Next next = Next::Trust;
         while (!done_) {
+            if (!arithmetic_finite()) {
+                stop(Status::RoundoffLimited);
+                break;
+            }
             switch (next) {
                 case Next::Trust:
                     next = trust_iteration();
@@ -256,6 +260,21 @@ public:
 
 private:
     enum class Next : std::uint8_t { Trust, Alternative, ReduceRho };
+
+    // The radii, the model gradient and the mu_l read from memory, so that no
+    // compiler's assumption about NaN and infinity can fold the test away.
+    // It runs before every iteration, the first included. The model's
+    // matrices hold terms of the size of the fourth power of the distances
+    // between the interpolation points, so an objective that keeps falling,
+    // with its trust region doubling at every step, overflows them at
+    // distances near DBL_MAX^(1/4), long before a coordinate overflows; and
+    // two finite values of the objective can differ by more than the largest
+    // double. The model is then not numbers, and a step computed from it
+    // would not end, so the run ends as it does when its predicted reduction
+    // is not positive.
+    [[nodiscard]] bool arithmetic_finite() const noexcept {
+        return !fp_bad(rho_) && !fp_bad(delta_) && !any_bad(model_.g) && !any_bad(model_.mu);
+    }
 
     // ============================================================ evaluation
     bool cap_reached() {

@@ -71,8 +71,9 @@ is zero.
   a negative or non-finite `final_trust_radius`, or a box narrower than
   `2 initial_step` without `shrink_initial_step`.
 - `std::runtime_error` during the run: the objective returned a non-finite
-  value, or the method would evaluate a point beyond the largest double (in
-  practice, an objective unbounded below).
+  value, or the method would evaluate a point beyond the largest double. An
+  objective unbounded below ends earlier, with `RoundoffLimited`, when the
+  model's arithmetic overflows at distances near `DBL_MAX^(1/4)`.
 - Anything the objective throws propagates unchanged.
 
 ## Example

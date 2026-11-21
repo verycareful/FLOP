@@ -72,10 +72,11 @@ struct Watch {
 // that is gone.
 struct Observed {
     Watch f;
-    bool refused = false;       // std::invalid_argument at entry
-    bool errored = false;       // std::runtime_error during the run
-    bool returned = false;      // a Result came back
-    bool result_finite = true;  // its point and value are finite
+    bool refused = false;                             // std::invalid_argument at entry
+    bool errored = false;                             // std::runtime_error during the run
+    bool returned = false;                            // a Result came back
+    flop::Status status = flop::Status::XtolReached;  // its status, when one did
+    bool result_finite = true;                        // its point and value are finite
 };
 
 // Runs minimize (or minimize_batch) on f = -x[0] 2^exponent from the origin in
@@ -94,6 +95,7 @@ std::shared_ptr<Observed> observe(std::size_t n, double step, int exponent, bool
             const flop::Result r = batch ? flop::bobyqa::minimize_batch(fb, x0, o)
                                          : flop::bobyqa::minimize(state->f, x0, o);
             state->returned = true;
+            state->status = r.status;
             state->result_finite = !flop::detail::any_bad(r.x) && !flop::detail::fp_bad(r.f);
         } catch (const std::invalid_argument&) {
             state->refused = true;
@@ -143,6 +145,26 @@ TEST(V0121Range, AnObjectiveUnboundedBelowEndsWithoutANonFinitePoint) {
         EXPECT_EQ(seen->f.non_finite, 0u) << "n " << c.n << " step " << c.step;
         EXPECT_TRUE(seen->result_finite) << "n " << c.n << " step " << c.step;
         EXPECT_TRUE(seen->returned || seen->errored) << "n " << c.n << " step " << c.step;
+    }
+}
+
+TEST(V0121Range, AnObjectiveFallingWithoutBoundEndsBeforeTheModelsArithmeticLeavesItsRange) {
+    // The matrices of the model hold terms of the size of the fourth power of
+    // the distances between the interpolation points. With the trust region
+    // doubling at every step on f = -x[0], they overflow near DBL_MAX^(1/4),
+    // about 1.2e77, long before a coordinate does; the run ends there with
+    // RoundoffLimited, as one whose predicted reduction is not positive, and
+    // does so whether or not the compiler assumes that no value is NaN.
+    const double range = 16.0 * std::pow(kMax, 0.25);
+    for (const std::size_t n : {std::size_t{1}, std::size_t{2}, std::size_t{3}, std::size_t{4}}) {
+        for (const bool batch : {false, true}) {
+            const auto seen = observe(n, 1.0, 0, batch, kDeadline);
+            ASSERT_NE(seen, nullptr) << "the run did not end: n " << n;
+            ASSERT_TRUE(seen->returned) << "n " << n;
+            EXPECT_EQ(seen->status, flop::Status::RoundoffLimited) << "n " << n;
+            EXPECT_EQ(seen->f.non_finite, 0u) << "n " << n;
+            EXPECT_LT(seen->f.largest, range) << "n " << n;
+        }
     }
 }
 
