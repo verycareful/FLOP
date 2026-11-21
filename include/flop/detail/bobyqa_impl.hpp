@@ -306,7 +306,10 @@ private:
 
     // The evaluations of the offsets in rows[first..last) of pts, into
     // out[first..last), as one batch when the objective takes one and the
-    // cap allows them all. False when the cap stopped them.
+    // cap allows them all. False when the cap stopped them. A batch is made
+    // whole even when a point in it meets stop_value; one point at a time
+    // ends at the point that meets it, with done_ set and the rows after it
+    // left unevaluated, so a caller reads out[] only while done_ is false.
     bool evaluate_rows(std::span<const double> pts, std::size_t first, std::size_t last,
                        std::span<double> out) {
         const std::size_t count = last - first;
@@ -329,6 +332,7 @@ private:
         }
         for (std::size_t r = first; r < last; ++r) {
             if (!evaluate(pts.subspan(r * n_, n_), out[r])) return false;
+            if (done_) return true;
         }
         return true;
     }
@@ -656,6 +660,7 @@ private:
             }
             if (!evaluate_rows(model_.points, first, last, vals)) return true;
         }
+        if (done_) return true;
         for (const std::size_t t : fresh) {
             std::span<const double> y = model_.point(t);
             const double diff = vals[t] - model_.fopt() - model_.change(y, work_);

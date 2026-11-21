@@ -223,8 +223,6 @@ against the report's 302 to 427 and 691 to 927 for its own five instances.
   objective can fail to end under `-ffast-math`.
 - A point can be one rounding error inside a bound it should be on, where
   the starting point was moved off the bound.
-- With a scalar objective, the starting points are all evaluated even when
-  the second of them is at or below `stop_value`.
 - Storage is `O(m^2 + m n + n^2)`: at `m = (n + 1)(n + 2) / 2` that is
   `O(n^4)`.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

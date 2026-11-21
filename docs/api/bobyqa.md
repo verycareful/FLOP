@@ -46,6 +46,8 @@ one call with `x0` first, then the other `m - 2n - 1`, which depend on the
 first values, as a second. It also takes the new points of a RESCUE. Every
 other evaluation is one point at a time. When a point inside such a call
 meets `stop_value`, every point of the call has been evaluated and counts.
+A scalar objective, or a call the evaluation cap cuts short, is evaluated one
+point at a time, and the run ends at the point that meets `stop_value`.
 The method takes no nonlinear constraints, and there is no overload for
 them.
 
