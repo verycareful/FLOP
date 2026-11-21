@@ -8,23 +8,16 @@
 // 0.1.2.1: the range of coordinates BOBYQA evaluates.
 //
 // Nothing non-finite is ever handed to the objective. An initial_step for
-// which x0 +- initial_step overflows is refused at entry, and a run that
-// would evaluate a point beyond the largest double ends with
-// std::runtime_error (docs/api/bobyqa.md), which in practice means an
-// objective unbounded below.
+// which x0 +- initial_step overflows is refused at entry, and so is one beyond
+// DBL_MAX^(1/4) / (4 n^2), the range in which the arithmetic of the model
+// stays finite (docs/api/bobyqa.md), unless shrink_initial_step brings the
+// first radius inside it. A run that would evaluate a point beyond the largest
+// double ends with std::runtime_error, and one whose model leaves the range
+// of a double ends with RoundoffLimited; in practice both mean an objective
+// unbounded below.
 //
-// The tests that end a run on a thread of its own are red on purpose: they
-// pin defects, and a run that does not end within the deadline fails its test
-// instead of holding the suite.
-//   - An unbounded objective, f = -x[0] from the origin with a first step of
-//     1, ends under the strict model and does not end under -ffast-math.
-//   - For a first step above about 1.3e154 (the square root of the largest
-//     double) and an objective whose values stay denormal, a run does not end
-//     under either model.
-//   - With an initial_step above about 1.3e154, the objective is handed a NaN
-//     coordinate at the first trust-region step. The test accepts either
-//     honest outcome, a refusal at entry or a run in which every point is
-//     finite.
+// The tests that end a run on a thread of its own are given a deadline: a run
+// that does not end within it fails its test instead of holding the suite.
 
 #include <gtest/gtest.h>
 
@@ -118,13 +111,51 @@ TEST(V0121Range, AStepThatOverflowsX0IsRefused) {
         EXPECT_THROW((void)flop::bobyqa::minimize(f, Vec{x0}, o), std::invalid_argument);
         EXPECT_EQ(f.calls, 0u) << "the objective was called";
     }
-    // initial_step = max - |x0| exactly: both sums are finite, so it is
-    // accepted; with the cap at one evaluation the run evaluates x0 alone.
+    // initial_step = max - |x0| exactly: both sums are finite, but the step is
+    // far beyond the range limit, so it is refused all the same.
     Watch f;
     flop::bobyqa::Options o = v0121::options(0.5 * kMax, 1);
-    EXPECT_NO_THROW((void)flop::bobyqa::minimize(f, Vec{0.5 * kMax}, o));
-    EXPECT_EQ(f.non_finite, 0u);
+    v0121::expect_rejected_everywhere(Vec{0.5 * kMax}, o, "beyond the range limit");
+    EXPECT_THROW((void)flop::bobyqa::minimize(f, Vec{0.5 * kMax}, o), std::invalid_argument);
+    EXPECT_EQ(f.calls, 0u) << "the objective was called";
+}
+
+TEST(V0121Range, TheFirstRadiusIsRefusedBeyondTheRangeLimitAndAcceptedAtIt) {
+    // The limit is DBL_MAX^(1/4) / (4 n^2). At it the run is accepted (with
+    // the cap at one evaluation it evaluates x0 alone); one step of the
+    // spacing beyond it, or twice it, is refused at entry in every channel.
+    for (const std::size_t n :
+         {std::size_t{1}, std::size_t{2}, std::size_t{3}, std::size_t{5}, std::size_t{20}}) {
+        const auto count = static_cast<double>(n);
+        const double limit = std::sqrt(std::sqrt(kMax)) / (4.0 * count * count);
+        const Vec x0(n, 0.0);
+        Watch f;
+        flop::bobyqa::Options o = v0121::options(limit, 1);
+        EXPECT_NO_THROW((void)flop::bobyqa::minimize(f, x0, o)) << "n " << n;
+        EXPECT_EQ(f.calls, 1u) << "n " << n;
+        o.initial_step = std::nextafter(limit, kMax);
+        v0121::expect_rejected_everywhere(x0, o, "one spacing beyond the range limit");
+        o.initial_step = 2.0 * limit;
+        v0121::expect_rejected_everywhere(x0, o, "twice the range limit");
+    }
+}
+
+TEST(V0121Range, ShrinkInitialStepBringsAStepBeyondTheLimitIntoItOnlyThroughANarrowBox) {
+    // The first radius is the smaller of initial_step and half the narrowest
+    // box, so a step beyond the limit is accepted when that is within it.
+    Watch f;
+    flop::bobyqa::Options o = v0121::options(1e200, 1);
+    o.shrink_initial_step = true;
+    o.bounds = flop::Bounds::box(Vec{-1.0}, Vec{1.0});
+    EXPECT_NO_THROW((void)flop::bobyqa::minimize(f, Vec{0.0}, o));
     EXPECT_EQ(f.calls, 1u);
+    // A box as wide as the step leaves the radius beyond the limit.
+    o.bounds = flop::Bounds::box(Vec{-1e200}, Vec{1e200});
+    v0121::expect_rejected_everywhere(Vec{0.0}, o, "a first radius beyond the range limit");
+    // Without shrink_initial_step the narrow box is refused as before.
+    o.shrink_initial_step = false;
+    o.bounds = flop::Bounds::box(Vec{-1.0}, Vec{1.0});
+    v0121::expect_rejected_everywhere(Vec{0.0}, o, "a box narrower than 2 initial_step");
 }
 
 TEST(V0121Range, AnObjectiveUnboundedBelowEndsWithoutANonFinitePoint) {
@@ -138,7 +169,7 @@ TEST(V0121Range, AnObjectiveUnboundedBelowEndsWithoutANonFinitePoint) {
     };
     for (const Case c :
          {Case{.n = 1, .step = 1.0, .batch = false}, Case{.n = 2, .step = 1e50, .batch = false},
-          Case{.n = 3, .step = 1e100, .batch = false}, Case{.n = 2, .step = 1.0, .batch = true}}) {
+          Case{.n = 3, .step = 1e70, .batch = false}, Case{.n = 2, .step = 1.0, .batch = true}}) {
         const auto seen = observe(c.n, c.step, 0, c.batch, kDeadline);
         ASSERT_NE(seen, nullptr) << "the run did not end: n " << c.n << " step " << c.step
                                  << (c.batch ? " batch" : "");
@@ -170,23 +201,29 @@ TEST(V0121Range, AnObjectiveFallingWithoutBoundEndsBeforeTheModelsArithmeticLeav
 
 TEST(V0121Range, AnUnboundedObjectiveOfTinyScaleEndsToo) {
     // The same objective scaled by 2^-1023, so its values stay denormal while
-    // the points grow, from a first step above sqrt(DBL_MAX).
+    // the points grow, from a first step inside the range limit and from one
+    // far beyond it, which is refused at entry.
     for (const std::size_t n : {std::size_t{1}, std::size_t{2}}) {
-        const auto seen = observe(n, 1e200, -1023, false, kDeadline);
-        ASSERT_NE(seen, nullptr) << "the run did not end: n " << n;
-        EXPECT_EQ(seen->f.non_finite, 0u) << "n " << n;
-        EXPECT_TRUE(seen->result_finite) << "n " << n;
+        for (const double step : {1e70, 1e200}) {
+            const auto seen = observe(n, step, -1023, false, kDeadline);
+            ASSERT_NE(seen, nullptr) << "the run did not end: n " << n << " step " << step;
+            EXPECT_EQ(seen->refused, step > 1e100) << "n " << n << " step " << step;
+            EXPECT_EQ(seen->f.non_finite, 0u) << "n " << n << " step " << step;
+            EXPECT_TRUE(seen->result_finite) << "n " << n << " step " << step;
+        }
     }
 }
 
 TEST(V0121Range, ALargeStepIsNeverTurnedIntoANonFinitePoint) {
-    // Red on purpose, see the file header. A step above sqrt(DBL_MAX) passes
-    // validation: x0 +- step is finite.
+    // A step above sqrt(DBL_MAX) passes the check that x0 +- step is finite,
+    // and is beyond the range limit: it is refused at entry, and nothing is
+    // evaluated.
     for (const std::size_t n : {std::size_t{1}, std::size_t{2}}) {
         for (const double step : {1e155, 1e200, 1e290}) {
             const auto seen = observe(n, step, 0, false, kDeadline);
             ASSERT_NE(seen, nullptr) << "the run did not end: n " << n << " step " << step;
-            if (seen->refused) continue;  // refused at entry: nothing was evaluated
+            EXPECT_TRUE(seen->refused) << "n " << n << " step " << step;
+            EXPECT_EQ(seen->f.calls, 0u) << "n " << n << " step " << step;
             EXPECT_EQ(seen->f.non_finite, 0u) << "n " << n << " step " << step;
         }
     }

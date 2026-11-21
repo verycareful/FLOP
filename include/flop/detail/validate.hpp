@@ -130,12 +130,29 @@ inline bool half_width_below(double lo, double hi, double h) {
     return -0.5 * lo < h - 0.5 * hi;
 }
 
+// The largest first radius BOBYQA accepts. The terms of its model are of the
+// size of the fourth power of the distances between the interpolation points,
+// and a radius of the size of DBL_MAX^(1/4) puts them at the end of the range
+// of a double; the factor 4 n^2 is the growth of those terms with the number
+// of variables, measured with the run held against the same run scaled by a
+// power of two, which changes no rounding, for n up to 200 and every number
+// of points: no run stayed identical beyond DBL_MAX^(1/4) / (1.14 n^2), and
+// this limit is 3.5 times below that.
+inline double bobyqa_radius_limit(std::size_t n) noexcept {
+    const auto count = static_cast<double>(n);
+    return std::sqrt(std::sqrt(std::numeric_limits<double>::max())) / (4.0 * count * count);
+}
+
 // BOBYQA's own input rules, after validate_options. The number of
 // interpolation points m is in [n + 2, (n + 1)(n + 2) / 2] (the report's
 // section 1); 0 selects 2n + 1. A coordinate bounded on both sides needs
 // b_i - a_i >= 2 initial_step (2.1), compared by half_width_below so that
 // the width cannot overflow, unless the caller asked for the step to
-// shrink. A fixed coordinate (a_i = b_i) is refused by validate_bounds.
+// shrink. The first radius is at most bobyqa_radius_limit; with
+// shrink_initial_step it is the smaller of initial_step and half the
+// narrowest box, so a step above the limit is accepted when some coordinate's
+// half-width is within it. A fixed coordinate (a_i = b_i) is refused by
+// validate_bounds.
 template <class BobyqaOptions>
 void validate_bobyqa(const char* where, const BobyqaOptions& o, std::span<const double> x0) {
     const std::size_t n = x0.size();
@@ -147,6 +164,24 @@ void validate_bobyqa(const char* where, const BobyqaOptions& o, std::span<const 
                         ", " + std::to_string(mmax) + "]");
     if (o.final_trust_radius < 0.0 || fp_bad(o.final_trust_radius))
         fail(where, "final_trust_radius must be zero or positive and finite");
+    const double limit = bobyqa_radius_limit(n);
+    if (o.initial_step > limit) {
+        const double beyond = std::nextafter(limit, std::numeric_limits<double>::max());
+        bool shrinks_into_range = false;
+        if (o.bounds && o.shrink_initial_step) {
+            for (std::size_t i = 0; i < n; ++i) {
+                const std::optional<double>& lo = o.bounds->lower[i];
+                const std::optional<double>& hi = o.bounds->upper[i];
+                if (lo.has_value() && hi.has_value() && half_width_below(*lo, *hi, beyond))
+                    shrinks_into_range = true;
+            }
+        }
+        if (!shrinks_into_range)
+            fail(where,
+                 "initial_step is beyond DBL_MAX^(1/4) / (4 n^2), the range in which the method's "
+                 "arithmetic stays finite (the terms of its model grow as the fourth power of the "
+                 "distances between the points)");
+    }
     if (!o.bounds || o.shrink_initial_step) return;
     for (std::size_t i = 0; i < n; ++i) {
         const std::optional<double>& lo = o.bounds->lower[i];

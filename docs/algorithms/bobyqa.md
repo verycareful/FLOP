@@ -102,6 +102,20 @@ costs `O(m^2)` beyond its evaluation, and a shift of origin `O(m^2 n)`.
   reduction, the curvature and the gradient back. A power of two changes no
   rounding, so the step is the one the unscaled arithmetic would give with
   unbounded range, and inside the range nothing is scaled.
+- **A range limit on the first radius.** The report has none. The terms of
+  the model are of the size of the fourth power of the distances between the
+  interpolation points, and a radius near `DBL_MAX^(1/4)`, about `1.2e77`,
+  puts them at the end of the range of a double; beyond it the model is not
+  numbers, and past about `1.3e154` a squared length overflows and the
+  objective would be handed a NaN coordinate. FLOP refuses a first radius
+  (after `shrink_initial_step`) above `DBL_MAX^(1/4) / (4 n^2)` with
+  `std::invalid_argument`. The factor `4 n^2` is the growth of those terms
+  with the number of variables, measured: a run at the first radius `s` was
+  held against the same run on an objective scaled by a power of two, which
+  changes no rounding, and for `n` up to 200 and every number of points none
+  stayed identical beyond `DBL_MAX^(1/4) / (1.14 n^2)`; the limit is 3.5
+  times below that. The small side has no such limit: a first radius below
+  about `1e-69` ends early with `RoundoffLimited`.
 - **TRSBOX's search round the boundary.** The report finds `theta_B` and
   `theta_Q` "approximately". FLOP computes `theta_B` in closed form: each
   coordinate of `d(theta)` is a sinusoid, which reaches a bound at
@@ -242,8 +256,6 @@ against the report's 302 to 427 and 691 to 927 for its own five instances.
   `rho` while `f` decreases, and can reach the cap with
   `MaxEvaluationsReached`. Whether it does depends on the rounding of the
   objective and the compiler.
-- A first step above about `1.3e154`, the square root of the largest double,
-  can hand the objective a NaN coordinate.
 - Storage is `O(m^2 + m n + n^2)`: at `m = (n + 1)(n + 2) / 2` that is
   `O(n^4)`.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

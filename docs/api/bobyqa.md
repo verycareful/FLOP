@@ -28,7 +28,10 @@ the quadratic model interpolates: `0` selects `2n + 1`, and any other value
 must lie in `[n + 2, (n + 1)(n + 2) / 2]`. Every coordinate bounded on both
 sides must have room for two first steps, `upper - lower >= 2 initial_step`,
 unless `shrink_initial_step` is set, which lowers the first radius to
-`min(initial_step, min_i (upper_i - lower_i) / 2)`.
+`min(initial_step, min_i (upper_i - lower_i) / 2)`. The first radius is at most
+`DBL_MAX^(1/4) / (4 n^2)`, about `3e76` for one variable and `1e75` for five:
+the terms of the model grow as the fourth power of the distances between its
+points, and beyond that range its arithmetic is not finite.
 
 ## Functions
 
@@ -67,9 +70,10 @@ is zero.
   criterion, a negative or non-finite tolerance, a non-positive
   `initial_step`, bounds of the wrong length, a lower bound not below its
   upper bound, `x0` outside the bounds, an `initial_step` for which
-  `x0 +- initial_step` overflows, `interpolation_points` outside its range,
-  a negative or non-finite `final_trust_radius`, or a box narrower than
-  `2 initial_step` without `shrink_initial_step`.
+  `x0 +- initial_step` overflows or that is beyond `DBL_MAX^(1/4) / (4 n^2)`
+  once `shrink_initial_step` has been applied, `interpolation_points` outside
+  its range, a negative or non-finite `final_trust_radius`, or a box narrower
+  than `2 initial_step` without `shrink_initial_step`.
 - `std::runtime_error` during the run: the objective returned a non-finite
   value, or the method would evaluate a point beyond the largest double. An
   objective unbounded below ends earlier, with `RoundoffLimited`, when the
