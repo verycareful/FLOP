@@ -63,6 +63,16 @@ inline double dot(std::span<const double> a, std::span<const double> b) noexcept
 // of one row at a time.
 constexpr std::size_t kRowBlock = 4;
 
+// Blocks pay for themselves once the chains are long enough to hide: shorter
+// sums run one row at a time, with the same bits.
+constexpr std::size_t kBlockMinLen = 4;
+
+// The rows of a loop that go in blocks: all but the last rows % kRowBlock, or
+// none when each sum is under kBlockMinLen terms.
+constexpr std::size_t block_end(std::size_t rows, std::size_t len) noexcept {
+    return len >= kBlockMinLen ? rows - rows % kRowBlock : 0;
+}
+
 // dd[r] = (row r) . v for kRowBlock consecutive rows of row-major data, rows
 // apart by stride and len long; each dot is summed in the order of dot().
 inline void block_dots(const double* rows, std::size_t stride, std::size_t len, const double* v,
@@ -85,7 +95,8 @@ template <bool SkipZero>
 inline void add_weighted_rows(const double* pts, std::size_t m, std::size_t n, const double* w,
                               const double* v, double* out) noexcept {
     std::size_t l = 0;
-    for (; l + kRowBlock <= m; l += kRowBlock) {
+    const std::size_t bend = block_end(m, n);
+    for (; l < bend; l += kRowBlock) {
         const double* yb = pts + l * n;
         double dd[kRowBlock];
         block_dots(yb, n, n, v, dd);
@@ -157,7 +168,8 @@ public:
     // out[j] = omega_diag(j) for every point, kRowBlock rows together.
     void omega_diag_all(std::span<double> out) const noexcept {
         std::size_t j = 0;
-        for (; j + kRowBlock <= m_; j += kRowBlock) {
+        const std::size_t bend = block_end(m_, nz_);
+        for (; j < bend; j += kRowBlock) {
             const double* zb = z_.data() + j * nz_;
             double s[kRowBlock] = {};
             for (std::size_t c = 0; c < nz_; ++c) {
@@ -175,7 +187,8 @@ public:
     void omega_col(std::size_t t, std::span<double> out) const noexcept {
         const double* zt = z_.data() + t * nz_;
         std::size_t i = 0;
-        for (; i + kRowBlock <= m_; i += kRowBlock) {
+        const std::size_t bend = block_end(m_, nz_);
+        for (; i < bend; i += kRowBlock) {
             double dd[kRowBlock];
             block_dots(z_.data() + i * nz_, nz_, nz_, zt, dd);
             for (std::size_t r = 0; r < kRowBlock; ++r) out[i + r] = dd[r];
@@ -256,7 +269,8 @@ public:
         }
         {
             std::size_t i = 0;
-            for (; i + kRowBlock <= m_; i += kRowBlock) {
+            const std::size_t bend = block_end(m_, n_);
+            for (; i < bend; i += kRowBlock) {
                 const double* yb = points.data() + i * n_;
                 double yd[kRowBlock] = {}, ys[kRowBlock] = {};
                 for (std::size_t k = 0; k < n_; ++k) {
@@ -291,7 +305,8 @@ public:
         }
         {
             std::size_t i = 0;
-            for (; i + kRowBlock <= m_; i += kRowBlock) {
+            const std::size_t bend = block_end(m_, n_);
+            for (; i < bend; i += kRowBlock) {
                 const double* zb = z_.data() + i * nz_;
                 const double* bb = b_.data() + i * n_;
                 double t[kRowBlock] = {}, bd[kRowBlock] = {};
@@ -357,7 +372,7 @@ public:
         }
         // Within a row, a0 carries from one rotation to the next, so a row is
         // a dependency chain; kRowBlock rows go together.
-        double* rows[kRowBlock];
+        double* rows[kRowBlock] = {};
         std::size_t pending = 0;
         for (std::size_t i = 0; i < m_; ++i) {
             if (i == t) continue;
@@ -408,22 +423,49 @@ public:
             const double proj = dot(s, diff);
             for (std::size_t k = 0; k < n_; ++k) gamma[k * m_ + j] = proj * diff[k] + ss4 * s[k];
         }
-        // C = Z (Z^T Gamma^T), m x n.
+        // C = Z (Z^T Gamma^T), m x n. Z^T gamma_k runs along the rows of Z, so
+        // that every pass is along memory; each entry adds its terms in the
+        // order of j.
         for (std::size_t k = 0; k < n_; ++k) {
-            for (std::size_t c = 0; c < nz_; ++c) {
-                double t = 0.0;
-                for (std::size_t j = 0; j < m_; ++j) t += z(j, c) * gamma[k * m_ + j];
-                zg[c] = t;
+            for (std::size_t c = 0; c < nz_; ++c) zg[c] = 0.0;
+            for (std::size_t j = 0; j < m_; ++j) {
+                const double g = gamma[k * m_ + j];
+                const double* zj = z_.data() + j * nz_;
+                for (std::size_t c = 0; c < nz_; ++c) zg[c] += zj[c] * g;
             }
-            for (std::size_t i = 0; i < m_; ++i) {
+            std::size_t i = 0;
+            const std::size_t bend = block_end(m_, nz_);
+            for (; i < bend; i += kRowBlock) {
+                double dd[kRowBlock];
+                block_dots(z_.data() + i * nz_, nz_, nz_, zg.data(), dd);
+                for (std::size_t r = 0; r < kRowBlock; ++r) cmat[(i + r) * n_ + k] = dd[r];
+            }
+            for (; i < m_; ++i) {
                 double t = 0.0;
                 for (std::size_t c = 0; c < nz_; ++c) t += z(i, c) * zg[c];
                 cmat[i * n_ + k] = t;
             }
         }
-        // Upsilon block, from the old B and C.
+        // Upsilon block, from the old B and C. Only the first m rows of B are
+        // read, and only the last n written, so the sums of kRowBlock
+        // consecutive q go together and their additions follow in order.
         for (std::size_t p = 0; p < n_; ++p) {
-            for (std::size_t q = 0; q <= p; ++q) {
+            std::size_t q = 0;
+            for (; q + kRowBlock <= p + 1; q += kRowBlock) {
+                double t[kRowBlock] = {};
+                for (std::size_t j = 0; j < m_; ++j) {
+                    const double gp = gamma[p * m_ + j], bp = b(j, p);
+                    for (std::size_t r = 0; r < kRowBlock; ++r) {
+                        const double gq = gamma[(q + r) * m_ + j];
+                        t[r] += gp * b(j, q + r) + bp * gq + gp * cmat[j * n_ + q + r];
+                    }
+                }
+                for (std::size_t r = 0; r < kRowBlock; ++r) {
+                    b(m_ + p, q + r) += t[r];
+                    if (q + r != p) b(m_ + q + r, p) += t[r];
+                }
+            }
+            for (; q <= p; ++q) {
                 double t = 0.0;
                 for (std::size_t j = 0; j < m_; ++j) {
                     const double gp = gamma[p * m_ + j], gq = gamma[q * m_ + j];
@@ -441,7 +483,7 @@ private:
     // The rotations saved in rot_ applied to count rows of Z (count at most
     // kRowBlock), each row taking them in the order c = 1, 2, ...
     void rotate_rows(double* const* rows, std::size_t count) noexcept {
-        if (count == kRowBlock) {
+        if (count == kRowBlock && nz_ >= kBlockMinLen) {
             double a0[kRowBlock];
             for (std::size_t r = 0; r < kRowBlock; ++r) a0[r] = rows[r][0];
             for (std::size_t c = 1; c < nz_; ++c) {
@@ -513,7 +555,8 @@ struct Model {
     // out = (M + sum_l mu_l y_l y_l^T) v.
     void hess_mul(std::span<const double> v, std::span<double> out) const noexcept {
         std::size_t i = 0;
-        for (; i + kRowBlock <= n; i += kRowBlock) {
+        const std::size_t bend = block_end(n, n);
+        for (; i < bend; i += kRowBlock) {
             double dd[kRowBlock];
             block_dots(hq.data() + i * n, n, n, v.data(), dd);
             for (std::size_t r = 0; r < kRowBlock; ++r) out[i + r] = dd[r];

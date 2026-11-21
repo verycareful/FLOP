@@ -581,7 +581,8 @@ private:
             for (std::size_t i = 0; i < n_; ++i) work_[i] += bj[i] * dj;
         }
         std::size_t j = 0;
-        for (; j + kRowBlock <= m_; j += kRowBlock) {
+        const std::size_t bend = block_end(m_, nz);
+        for (; j < bend; j += kRowBlock) {
             double dd[kRowBlock];
             block_dots(inv_.z_row(j).data(), nz, nz, zw_.data(), dd);
             for (std::size_t r = 0; r < kRowBlock; ++r) lam_[j + r] = dd[r];

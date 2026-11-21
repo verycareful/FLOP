@@ -84,7 +84,8 @@ inline double lag_curvature(const Model& model, std::span<const double> lambda,
                             std::span<const double> v) noexcept {
     double s = 0.0;
     std::size_t l = 0;
-    for (; l + kRowBlock <= model.m; l += kRowBlock) {
+    const std::size_t bend = block_end(model.m, model.n);
+    for (; l < bend; l += kRowBlock) {
         double yv[kRowBlock];
         block_dots(model.points.data() + l * model.n, model.n, model.n, v.data(), yv);
         for (std::size_t r = 0; r < kRowBlock; ++r) s += lambda[l + r] * yv[r] * yv[r];
