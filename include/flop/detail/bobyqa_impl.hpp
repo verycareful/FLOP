@@ -183,7 +183,7 @@ public:
             *span = std::span<double>(scratch_.data() + at, size);
             at += size;
         }
-        std::copy(x0.begin(), x0.end(), xbase_.begin());
+        std::ranges::copy(x0, xbase_.begin());
         // The bounds as plain values beside the box's flags: the box itself
         // holds them as offsets from the origin, which moves.
         if (bounds_) {
@@ -473,7 +473,7 @@ private:
     // Section 6, (6.13)-(6.17): the origin moves to x_k.
     void shift_origin() {
         std::span<const double> xk = model_.xopt();
-        std::copy(xk.begin(), xk.end(), shift_.begin());
+        std::ranges::copy(xk, shift_.begin());
         const std::span<const double> s = shift_;
         inv_.shift(model_.points, s, gamma_, cmat_, zw_, work_);
         model_.shift_hessian(s, work_);
@@ -637,9 +637,9 @@ private:
             fval[j] = model_.fval[plan.origin[j]];
             mu[j] = model_.mu[plan.origin[j]];
         }
-        std::copy(plan.points.begin(), plan.points.end(), model_.points.begin());
-        std::copy(fval.begin(), fval.end(), model_.fval.begin());
-        std::copy(mu.begin(), mu.end(), model_.mu.begin());
+        std::ranges::copy(plan.points, model_.points.begin());
+        std::ranges::copy(fval, model_.fval.begin());
+        std::ranges::copy(mu, model_.mu.begin());
         model_.kopt = 0;
         error_count_ = 0;
         if (fresh.empty()) return false;
