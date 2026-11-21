@@ -7,6 +7,71 @@ every release entry ends with a `### Results` section giving the full-suite
 totals of the run that gated it. Versions are `MajorA.MajorB.Minor.Patch`;
 patch `.1` of every minor is a test-only release.
 
+## [0.1.2.1] - 2026-11-21 15:56 IST
+
+The test release for BOBYQA. BOBYQA shipped in 0.1.2.0 with no tests, so this
+is its whole suite: 131 tests in 19 files, strict and -ffast-math, on four
+trees. No library behaviour changes. Eight things the tests found are pinned
+red, with a test each, for the next release to fix; CI is red on them by
+design.
+
+### Changed
+
+- `docs/algorithms/bobyqa.md`: the verification section names the tests that
+  pin each rule of the report and says which are not pinned one by one; the
+  first entry of a column of Z in (2.14) is listed as a deviation (as printed
+  in the copy I read, the three entries of the column do not sum to zero, and
+  the explicit inverse of W agrees with the sign the library uses); the limits
+  list what the tests found.
+- `docs/Architecture.md`: Result's field is `final_radius`.
+- The version test accepts a four- or five-component label.
+
+### Tests
+
+- Validation, options, range and tolerance: every `std::invalid_argument` on
+  both entry points and through the facade, each with the guarantee that a
+  rejected call evaluates nothing; every legal number of interpolation points;
+  the first radius shrunk to a narrow box; the callback's order; the FtolReached
+  rule on both tolerances.
+- The starting procedure (2.2) to (2.5): the points from an interior x0, a lower
+  bound and an upper bound, the report's nine pairs at n = 5, m = 20, the swap
+  and its exceptions, and the first model read from the first step.
+- The inverse matrix against the inverse of W built from its definition and
+  inverted explicitly: (2.11) to (2.15) for every m with n <= 5, the update (4.9)
+  to (4.14) over random replacements, (4.24), and the shift (6.14) to (6.16).
+- The model: the matrix (4.6), the move into M, the rank two matrix (6.17), and
+  the whole update of section 4 composed from the solver's pieces, held to the
+  explicit update.
+- TRSBOX and ALTMOV: (3.3) to (3.6) against closed forms and the properties of
+  any step; the line step (3.11) and the Cauchy step (3.13) to (3.15) against an
+  independent computation from the explicit Lagrange function.
+- The control of the radii through runs whose trace shows the rule ((6.4), the
+  short step, (6.6), (6.13)), and RESCUE: the multipliers of (5.4), the gamma
+  points, the iteration of (5.6) and (5.7) written out again with an explicit
+  inverse, and (5.3) with (5.12).
+- Status, bounds, the batch channel (scalar and batch identical to the bit),
+  floating point (a power of two on the objective changes no point), the facade,
+  both headers standing alone, and the report's own problems of section 7
+  against its Tables 1 to 3.
+- Pinned red, found by these tests: an unbounded objective that never ends under
+  -ffast-math, and a large first step or an objective of tiny values that does
+  not end under either model; a first step above about 1.3e154 that hands the
+  objective a NaN coordinate; the box-width test regrouped by -ffast-math into
+  an overflow; a non-finite batch value that clang -ffast-math does not catch;
+  the scalar channel evaluating all starting points after a stop value is met
+  in them; a point a rounding error inside a bound it should be on; and an
+  XtolReached from a wrong point when the objective is scaled by 1e140 or more,
+  or by 1e-200 or less.
+
+### Results
+
+437 tests across 49 suites in each binary (8.7 s strict, 33 s -ffast-math on
+GCC, Linux x86-64; GCC 16.2.1, GCC 14.3.1, clang 23.1.5, and GCC 16.2.1 with the
+library under -ffast-math). Every test that is not one of the pinned ones passes
+in every binary on every tree; the pinned ones fail on purpose: 6 of 437 in the
+strict binary, 9 in the -ffast-math binary on GCC, 6 in it on clang, and 7 and 9
+on the tree with the library under -ffast-math.
+
 ## [0.1.2.0] - 2026-11-21 13:28 IST
 
 The third algorithm: BOBYQA, written from Powell's report DAMTP 2009/NA06,

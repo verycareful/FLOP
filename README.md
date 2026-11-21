@@ -4,7 +4,7 @@
 [![GoogleTest](https://img.shields.io/badge/GoogleTest-1.14.0-4285F4?logo=google&logoColor=white)](https://github.com/google/googletest)
 [![Google Benchmark](https://img.shields.io/badge/Google%20Benchmark-1.8.3-4285F4)](https://github.com/google/benchmark)
 [![CI](https://github.com/verycareful/FLOP/actions/workflows/ci.yml/badge.svg)](https://github.com/verycareful/FLOP/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.1.2.0-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.2.1-blue)](https://github.com/verycareful/FLOP/blob/main/CHANGELOG.md)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-brightgreen)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Early%20Development-orange)](https://github.com/verycareful/FLOP)
 
