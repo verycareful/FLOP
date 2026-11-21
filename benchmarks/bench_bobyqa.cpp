@@ -23,14 +23,15 @@
 // every even coordinate binds, so the steps run along the bounds and the
 // projections in TRSBOX and ALTMOV are exercised.
 //
-// The numbers to compare against, NLopt 2.7.1's BOBYQA (the Ubuntu 24.04
-// package) on the same rows with xtol_abs 1e-8, measured beside this file's
-// rows on 2026-11-05, x86-64, GCC 13.3, medians of seven repetitions, in ns
-// per evaluation with evaluations per run in parentheses. Unbounded: 380
-// (26) at 2 parameters, 2400 (45) at 8, 6631 (61) at 16, 18306 (94) at 32,
-// 42184 (161) at 64, 118456 (289) at 128. Inside the box that never binds:
-// 385, 2383, 6292, 18375, 42963, 123541, with the same counts. Active box:
-// 354 (24), 2137 (45), 6489 (84), 31081 (135), 78812 (259) at 2 to 64.
+// The numbers to compare against, NLopt 2.7.1's BOBYQA (the v2.7.1 tag,
+// Release build, -O3) on the same rows with xtol_abs 1e-8, measured beside
+// this file's rows on 2026-11-21, AMD Ryzen 9 7900X, GCC 16.2, one core of an
+// idle machine, medians of seven repetitions, in ns per evaluation with
+// evaluations per run in parentheses. Unbounded: 348 (26) at 2 parameters,
+// 1306 (45) at 8, 3193 (61) at 16, 8763 (94) at 32, 24907 (161) at 64, 68898
+// (289) at 128. Inside the box that never binds: 350, 1296, 3197, 8785,
+// 25377, 68988, with the same counts. Active box: 303 (25), 1172 (45), 3393
+// (81), 12287 (144), 34947 (259) at 2 to 64.
 
 #include <benchmark/benchmark.h>
 

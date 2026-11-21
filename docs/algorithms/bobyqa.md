@@ -71,7 +71,7 @@ costs `O(m^2)` beyond its evaluation, and a shift of origin `O(m^2 n)`.
   problem (7.1), five random instances each at `n = 10` and `n = 20` with
   `m = 2n + 1`, `rhobeg = 0.1` and `rhoend = 1e-6`, the report's weight
   needed about a third more evaluations than NEWUOA's at the same accuracy
-  (5926 against 4413 in total). `newuoa_weight = false` selects the report's weight.
+  (5958 against 4542 in total). `newuoa_weight = false` selects the report's weight.
 - **Coordinates without a bound.** The report sets unwanted bounds to
   `+-1e60`. FLOP has no such values: a coordinate without a bound on a side
   has no constraint there, and every test against that side is skipped.
