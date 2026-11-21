@@ -464,9 +464,7 @@ private:
         return best;
     }
 
-    void fill_hdiag() {
-        for (std::size_t j = 0; j < m_; ++j) hdiag_[j] = inv_.omega_diag(j);
-    }
+    void fill_hdiag() { inv_.omega_diag_all(std::span<double>(hdiag_.data(), m_)); }
 
     [[nodiscard]] double sigma_of(std::size_t t, double beta) const {
         return inv_.omega_diag(t) * beta + vlag_[t] * vlag_[t];
@@ -501,11 +499,8 @@ private:
         }
         // (4.8): the gradient at the old x_k.
         for (std::size_t i = 0; i < n_; ++i) model_.g[i] += diff * inv_.b(t, i);
-        for (std::size_t l = 0; l < m_; ++l) {
-            std::span<const double> yl = model_.point(l);
-            const double c = lam_[l] * dot(yl, xold);
-            for (std::size_t i = 0; i < n_; ++i) model_.g[i] += c * yl[i];
-        }
+        add_weighted_rows<false>(model_.points.data(), m_, n_, lam_.data(), xold.data(),
+                                 model_.g.data());
         if (improved) {
             for (std::size_t i = 0; i < n_; ++i) work2_[i] = xnew_[i] - xold[i];
             model_.hess_mul(work2_, work_);
@@ -573,27 +568,32 @@ private:
     // which its projected gradient is the much smaller one.
     void alternative_model_test() {
         const double fo = model_.fopt();
-        for (std::size_t c = 0; c < inv_.columns(); ++c) {
-            double t = 0.0;
-            for (std::size_t j = 0; j < m_; ++j) t += inv_.z(j, c) * (model_.fval[j] - fo);
-            zw_[c] = t;
-        }
+        const std::size_t nz = inv_.columns();
+        // Z^T (F - fo) and B^T (F - fo) by rows of Z and B, so that every pass
+        // runs along memory; each entry still adds its terms in the order of j.
+        for (std::size_t c = 0; c < nz; ++c) zw_[c] = 0.0;
+        for (std::size_t i = 0; i < n_; ++i) work_[i] = 0.0;
         for (std::size_t j = 0; j < m_; ++j) {
+            const double dj = model_.fval[j] - fo;
+            const double* zj = inv_.z_row(j).data();
+            for (std::size_t c = 0; c < nz; ++c) zw_[c] += zj[c] * dj;
+            const double* bj = inv_.b_row(j).data();
+            for (std::size_t i = 0; i < n_; ++i) work_[i] += bj[i] * dj;
+        }
+        std::size_t j = 0;
+        for (; j + kRowBlock <= m_; j += kRowBlock) {
+            double dd[kRowBlock];
+            block_dots(inv_.z_row(j).data(), nz, nz, zw_.data(), dd);
+            for (std::size_t r = 0; r < kRowBlock; ++r) lam_[j + r] = dd[r];
+        }
+        for (; j < m_; ++j) {
             double t = 0.0;
-            for (std::size_t c = 0; c < inv_.columns(); ++c) t += inv_.z(j, c) * zw_[c];
+            for (std::size_t c = 0; c < nz; ++c) t += inv_.z(j, c) * zw_[c];
             lam_[j] = t;
         }
         std::span<const double> xk = model_.xopt();
-        for (std::size_t i = 0; i < n_; ++i) {
-            double t = 0.0;
-            for (std::size_t j = 0; j < m_; ++j) t += inv_.b(j, i) * (model_.fval[j] - fo);
-            work_[i] = t;
-        }
-        for (std::size_t l = 0; l < m_; ++l) {
-            std::span<const double> yl = model_.point(l);
-            const double c = lam_[l] * dot(yl, xk);
-            for (std::size_t i = 0; i < n_; ++i) work_[i] += c * yl[i];
-        }
+        add_weighted_rows<false>(model_.points.data(), m_, n_, lam_.data(), xk.data(),
+                                 work_.data());
         if (projected_norm2(work_) <= kAltModelRatio * projected_norm2(model_.g)) {
             ++alt_model_runs_;
         } else {

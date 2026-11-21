@@ -55,6 +55,57 @@ inline double dot(std::span<const double> a, std::span<const double> b) noexcept
     return s;
 }
 
+// A sum of products is a chain: each addition waits for the one before it
+// (3 to 4 cycles), and the order is fixed because results are pinned bit for
+// bit. Rows are independent, so the loops over the rows of Z, B and the point
+// set take kRowBlock rows together and give the core that many chains to
+// overlap. Every row still accumulates in its own order, so the bits are those
+// of one row at a time.
+constexpr std::size_t kRowBlock = 4;
+
+// dd[r] = (row r) . v for kRowBlock consecutive rows of row-major data, rows
+// apart by stride and len long; each dot is summed in the order of dot().
+inline void block_dots(const double* rows, std::size_t stride, std::size_t len, const double* v,
+                       double* dd) noexcept {
+    double acc[kRowBlock] = {};
+    for (std::size_t k = 0; k < len; ++k) {
+        const double vk = v[k];
+        for (std::size_t r = 0; r < kRowBlock; ++r) acc[r] += rows[r * stride + k] * vk;
+    }
+    for (std::size_t r = 0; r < kRowBlock; ++r) dd[r] = acc[r];
+}
+
+// out += sum over l of w[l] (y_l . v) y_l, with y_l the m rows of pts (n
+// columns), added in the order of l. The dots of a block are independent of
+// the additions into out, so a block takes its dots together and then adds
+// its rows one after another: out[i] sees the same sequence of additions as
+// with one row at a time. With SkipZero a row whose weight is zero adds
+// nothing. out must not overlap v or pts.
+template <bool SkipZero>
+inline void add_weighted_rows(const double* pts, std::size_t m, std::size_t n, const double* w,
+                              const double* v, double* out) noexcept {
+    std::size_t l = 0;
+    for (; l + kRowBlock <= m; l += kRowBlock) {
+        const double* yb = pts + l * n;
+        double dd[kRowBlock];
+        block_dots(yb, n, n, v, dd);
+        for (std::size_t r = 0; r < kRowBlock; ++r) {
+            if (SkipZero && w[l + r] == 0.0) continue;
+            const double c = w[l + r] * dd[r];
+            const double* y = yb + r * n;
+            for (std::size_t i = 0; i < n; ++i) out[i] += c * y[i];
+        }
+    }
+    for (; l < m; ++l) {
+        if (SkipZero && w[l] == 0.0) continue;
+        const double* y = pts + l * n;
+        double d = 0.0;
+        for (std::size_t k = 0; k < n; ++k) d += y[k] * v[k];
+        const double c = w[l] * d;
+        for (std::size_t i = 0; i < n; ++i) out[i] += c * y[i];
+    }
+}
+
 // The pair {p(j), q(j)} of (2.3)-(2.4), 0-based, for the extra point with
 // 0-based index e = j - (2n + 2) beyond the first 2n + 1. p cycles through
 // the coordinates; in the l-th cycle (l = e / n + 1) q is p + l, wrapped
@@ -92,6 +143,9 @@ public:
     [[nodiscard]] std::span<const double> b_row(std::size_t r) const noexcept {
         return {b_.data() + r * n_, n_};
     }
+    [[nodiscard]] std::span<const double> z_row(std::size_t i) const noexcept {
+        return {z_.data() + i * nz_, nz_};
+    }
 
     // H_tt = e_t^T Z Z^T e_t = |Z^T e_t|^2, nonnegative by construction (5.1).
     [[nodiscard]] double omega_diag(std::size_t t) const noexcept {
@@ -100,9 +154,33 @@ public:
         return s;
     }
 
+    // out[j] = omega_diag(j) for every point, kRowBlock rows together.
+    void omega_diag_all(std::span<double> out) const noexcept {
+        std::size_t j = 0;
+        for (; j + kRowBlock <= m_; j += kRowBlock) {
+            const double* zb = z_.data() + j * nz_;
+            double s[kRowBlock] = {};
+            for (std::size_t c = 0; c < nz_; ++c) {
+                for (std::size_t r = 0; r < kRowBlock; ++r) {
+                    const double v = zb[r * nz_ + c];
+                    s[r] += v * v;
+                }
+            }
+            for (std::size_t r = 0; r < kRowBlock; ++r) out[j + r] = s[r];
+        }
+        for (; j < m_; ++j) out[j] = omega_diag(j);
+    }
+
     // out = Omega e_t, the parameters lambda of Lambda_t (4.16).
     void omega_col(std::size_t t, std::span<double> out) const noexcept {
-        for (std::size_t i = 0; i < m_; ++i) {
+        const double* zt = z_.data() + t * nz_;
+        std::size_t i = 0;
+        for (; i + kRowBlock <= m_; i += kRowBlock) {
+            double dd[kRowBlock];
+            block_dots(z_.data() + i * nz_, nz_, nz_, zt, dd);
+            for (std::size_t r = 0; r < kRowBlock; ++r) out[i + r] = dd[r];
+        }
+        for (; i < m_; ++i) {
             double s = 0.0;
             for (std::size_t c = 0; c < nz_; ++c) s += z(i, c) * z(t, c);
             out[i] = s;
@@ -176,14 +254,30 @@ public:
             d[k] = x[k] - xs[k];
             sum[k] = x[k] + xs[k];
         }
-        for (std::size_t i = 0; i < m_; ++i) {
-            const double* yi = points.data() + i * n_;
-            double yd = 0.0, ys = 0.0;
-            for (std::size_t k = 0; k < n_; ++k) {
-                yd += yi[k] * d[k];
-                ys += yi[k] * sum[k];
+        {
+            std::size_t i = 0;
+            for (; i + kRowBlock <= m_; i += kRowBlock) {
+                const double* yb = points.data() + i * n_;
+                double yd[kRowBlock] = {}, ys[kRowBlock] = {};
+                for (std::size_t k = 0; k < n_; ++k) {
+                    const double dk = d[k], sk = sum[k];
+                    for (std::size_t r = 0; r < kRowBlock; ++r) {
+                        const double y = yb[r * n_ + k];
+                        yd[r] += y * dk;
+                        ys[r] += y * sk;
+                    }
+                }
+                for (std::size_t r = 0; r < kRowBlock; ++r) wv[i + r] = 0.5 * yd[r] * ys[r];
             }
-            wv[i] = 0.5 * yd * ys;
+            for (; i < m_; ++i) {
+                const double* yi = points.data() + i * n_;
+                double yd = 0.0, ys = 0.0;
+                for (std::size_t k = 0; k < n_; ++k) {
+                    yd += yi[k] * d[k];
+                    ys += yi[k] * sum[k];
+                }
+                wv[i] = 0.5 * yd * ys;
+            }
         }
         // Z^T wv and B^T wv by rows, so that every pass runs along memory.
         for (std::size_t c = 0; c < nz_; ++c) zw[c] = 0.0;
@@ -195,11 +289,28 @@ public:
             const double* bi = b_.data() + i * n_;
             for (std::size_t k = 0; k < n_; ++k) vlag[m_ + k] += bi[k] * wi;
         }
-        for (std::size_t i = 0; i < m_; ++i) {
-            const double* zi = z_.data() + i * nz_;
-            double t = 0.0;
-            for (std::size_t c = 0; c < nz_; ++c) t += zi[c] * zw[c];
-            vlag[i] = t + dot(b_row(i), d);
+        {
+            std::size_t i = 0;
+            for (; i + kRowBlock <= m_; i += kRowBlock) {
+                const double* zb = z_.data() + i * nz_;
+                const double* bb = b_.data() + i * n_;
+                double t[kRowBlock] = {}, bd[kRowBlock] = {};
+                for (std::size_t c = 0; c < nz_; ++c) {
+                    const double wc = zw[c];
+                    for (std::size_t r = 0; r < kRowBlock; ++r) t[r] += zb[r * nz_ + c] * wc;
+                }
+                for (std::size_t k = 0; k < n_; ++k) {
+                    const double dk = d[k];
+                    for (std::size_t r = 0; r < kRowBlock; ++r) bd[r] += bb[r * n_ + k] * dk;
+                }
+                for (std::size_t r = 0; r < kRowBlock; ++r) vlag[i + r] = t[r] + bd[r];
+            }
+            for (; i < m_; ++i) {
+                const double* zi = z_.data() + i * nz_;
+                double t = 0.0;
+                for (std::size_t c = 0; c < nz_; ++c) t += zi[c] * zw[c];
+                vlag[i] = t + dot(b_row(i), d);
+            }
         }
         for (std::size_t l = 0; l < n_; ++l) {
             const double dl = d[l];
@@ -244,18 +355,19 @@ public:
             zt_row[0] = r;
             zt_row[c] = 0.0;
         }
+        // Within a row, a0 carries from one rotation to the next, so a row is
+        // a dependency chain; kRowBlock rows go together.
+        double* rows[kRowBlock];
+        std::size_t pending = 0;
         for (std::size_t i = 0; i < m_; ++i) {
             if (i == t) continue;
-            double* zi = z_.data() + i * nz_;
-            double a0 = zi[0];
-            for (std::size_t c = 1; c < nz_; ++c) {
-                const double cs = rot_[c], sn = rot_[nz_ + c];
-                const double ac = zi[c];
-                zi[c] = cs * ac - sn * a0;
-                a0 = cs * a0 + sn * ac;
+            rows[pending++] = z_.data() + i * nz_;
+            if (pending == kRowBlock) {
+                rotate_rows(rows, pending);
+                pending = 0;
             }
-            zi[0] = a0;
         }
+        rotate_rows(rows, pending);
         const double zt = z(t, 0);
         const double alpha = zt * zt;
         const double tau = vlag[t];
@@ -326,6 +438,36 @@ public:
     }
 
 private:
+    // The rotations saved in rot_ applied to count rows of Z (count at most
+    // kRowBlock), each row taking them in the order c = 1, 2, ...
+    void rotate_rows(double* const* rows, std::size_t count) noexcept {
+        if (count == kRowBlock) {
+            double a0[kRowBlock];
+            for (std::size_t r = 0; r < kRowBlock; ++r) a0[r] = rows[r][0];
+            for (std::size_t c = 1; c < nz_; ++c) {
+                const double cs = rot_[c], sn = rot_[nz_ + c];
+                for (std::size_t r = 0; r < kRowBlock; ++r) {
+                    const double ac = rows[r][c];
+                    rows[r][c] = cs * ac - sn * a0[r];
+                    a0[r] = cs * a0[r] + sn * ac;
+                }
+            }
+            for (std::size_t r = 0; r < kRowBlock; ++r) rows[r][0] = a0[r];
+            return;
+        }
+        for (std::size_t r = 0; r < count; ++r) {
+            double* zi = rows[r];
+            double a0 = zi[0];
+            for (std::size_t c = 1; c < nz_; ++c) {
+                const double cs = rot_[c], sn = rot_[nz_ + c];
+                const double ac = zi[c];
+                zi[c] = cs * ac - sn * a0;
+                a0 = cs * a0 + sn * ac;
+            }
+            zi[0] = a0;
+        }
+    }
+
     std::size_t n_, m_, nz_;
     std::vector<double> z_, b_;
     std::vector<double> rot_;  // the rotations of update: cosines, then sines
@@ -370,17 +512,18 @@ struct Model {
 
     // out = (M + sum_l mu_l y_l y_l^T) v.
     void hess_mul(std::span<const double> v, std::span<double> out) const noexcept {
-        for (std::size_t i = 0; i < n; ++i) {
+        std::size_t i = 0;
+        for (; i + kRowBlock <= n; i += kRowBlock) {
+            double dd[kRowBlock];
+            block_dots(hq.data() + i * n, n, n, v.data(), dd);
+            for (std::size_t r = 0; r < kRowBlock; ++r) out[i + r] = dd[r];
+        }
+        for (; i < n; ++i) {
             double s = 0.0;
             for (std::size_t k = 0; k < n; ++k) s += hq[i * n + k] * v[k];
             out[i] = s;
         }
-        for (std::size_t l = 0; l < m; ++l) {
-            if (mu[l] == 0.0) continue;
-            std::span<const double> yl = point(l);
-            const double c = mu[l] * dot(yl, v);
-            for (std::size_t i = 0; i < n; ++i) out[i] += c * yl[i];
-        }
+        add_weighted_rows<true>(points.data(), m, n, mu.data(), v.data(), out.data());
     }
 
     // The diagonal element (i, i) of the second derivative matrix.

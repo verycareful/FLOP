@@ -90,6 +90,9 @@ inline RescuePlan rescue_plan(const Model& model, const Box& box, double delta, 
         if (psi[i] > psi_max) psi_max = psi[i];
     }
     std::vector<double> vlag(m + n), wv(m), zw(inv.columns()), d(n), sum(n), h(m + n), u(m + n);
+    // H_jj for every slot, recomputed after each update (Z changes only there).
+    std::vector<double> hdiag(m);
+    inv.omega_diag_all(hdiag);
     std::vector<char> tried(m, 0);
     for (;;) {
         for (char& x : tried) x = 0;
@@ -109,7 +112,7 @@ inline RescuePlan rescue_plan(const Model& model, const Box& box, double delta, 
             for (std::size_t j = 1; j < m; ++j) {
                 tau_max = std::fmax(tau_max, vlag[j] * vlag[j]);
                 if (plan.origin[j] != kNewPoint) continue;
-                const double sigma = inv.omega_diag(j) * beta_l + vlag[j] * vlag[j];
+                const double sigma = hdiag[j] * beta_l + vlag[j] * vlag[j];
                 if (best == m || sigma > best_sigma) {
                     best = j;
                     best_sigma = sigma;
@@ -117,6 +120,7 @@ inline RescuePlan rescue_plan(const Model& model, const Box& box, double delta, 
             }
             if (best < m && best_sigma > kRescueSafe * tau_max && best_sigma > 0.0) {
                 inv.update(best, vlag, beta_l, h, u);
+                inv.omega_diag_all(hdiag);
                 for (std::size_t k = 0; k < n; ++k) plan.points[best * n + k] = y[k];
                 plan.origin[best] = ell;
                 psi[ell] = 0.0;

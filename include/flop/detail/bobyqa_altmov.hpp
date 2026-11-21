@@ -75,18 +75,21 @@ namespace altmov_detail {
 inline void lag_hess_mul(const Model& model, std::span<const double> lambda,
                          std::span<const double> v, std::span<double> out) noexcept {
     for (std::size_t i = 0; i < model.n; ++i) out[i] = 0.0;
-    for (std::size_t l = 0; l < model.m; ++l) {
-        std::span<const double> yl = model.point(l);
-        const double c = lambda[l] * dot(yl, v);
-        for (std::size_t i = 0; i < model.n; ++i) out[i] += c * yl[i];
-    }
+    add_weighted_rows<false>(model.points.data(), model.m, model.n, lambda.data(), v.data(),
+                             out.data());
 }
 
 // s^T (nabla^2 Lambda_t) s = sum_l lambda_l (y_l.s)^2.
 inline double lag_curvature(const Model& model, std::span<const double> lambda,
                             std::span<const double> v) noexcept {
     double s = 0.0;
-    for (std::size_t l = 0; l < model.m; ++l) {
+    std::size_t l = 0;
+    for (; l + kRowBlock <= model.m; l += kRowBlock) {
+        double yv[kRowBlock];
+        block_dots(model.points.data() + l * model.n, model.n, model.n, v.data(), yv);
+        for (std::size_t r = 0; r < kRowBlock; ++r) s += lambda[l + r] * yv[r] * yv[r];
+    }
+    for (; l < model.m; ++l) {
         const double yv = dot(model.point(l), v);
         s += lambda[l] * yv * yv;
     }
