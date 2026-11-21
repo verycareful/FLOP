@@ -110,6 +110,12 @@ costs `O(m^2)` beyond its evaluation, and a shift of origin `O(m^2 n)`.
 - **The temporary radius of an alternative iteration.** RESCUE, when an
   alternative iteration calls it, builds its points with the iteration's
   `Delta`, not the reduced radius ALTMOV is given (after (6.5)).
+- **The first entry of a column of Z.** In the copy of the report I read, (2.14)
+  prints `Z_{1l} = +sqrt(2) / (alpha_l beta_l)`. The three entries of the
+  column then sum to `2 sqrt(2) / (alpha_l beta_l)`, and `Omega Y^T = 0`
+  needs them to sum to zero, so the first entry here is
+  `-sqrt(2) / (alpha_l beta_l)`. The inverse of `W` built from its
+  definition agrees with it for every `m` with `n <= 5`.
 - **Error returns.** The report's two error returns, a predicted reduction
   that is not positive in (6.3) and a second RESCUE in one iteration that
   would change nothing, end the run with `RoundoffLimited`.
@@ -158,30 +164,44 @@ Whatever the status, the result is the best point evaluated, and
 
 ## Verification against the paper
 
-These rules were read against the report's text and checked numerically
-while they were written, and await the tests that pin them:
+These rules were read against the report's text, and each is pinned by a
+test in `tests/test_v0121_*.cpp`:
 
 - the starting points (2.2) to (2.4), including the swap of the pair at
-  `+-Delta` when the second value is the lower one, and the first model
-  (2.5);
+  `+-Delta` when the second value is the lower one, the report's example of
+  nine pairs at `n = 5`, `m = 20`, and the first model (2.5), read from the
+  first step of the method;
 - the inverse matrix (2.11) to (2.15), its update (4.9) to (4.14) with the
-  identities (4.13), and the shift (6.14) to (6.17), each checked against
-  an explicitly inverted `W` of (2.7) for every `m` with `n <= 5`;
-- the model update (4.3) to (4.8), checked by the model interpolating every
-  point to rounding after every update;
+  identities (4.13), the closed form (4.24) of `beta`, and the shift (6.14)
+  to (6.16), each against the inverse of `W` of (2.7) built from its
+  definition and inverted explicitly, for every `m` with `n <= 5` where the
+  starting matrix is concerned;
+- the model update (4.3) to (4.8), composed from the pieces of the solver in
+  the report's order: the model interpolates every point after every update
+  and equals the explicit update;
 - TRSBOX's initial active set (3.3), its tests (3.4) and (3.5), and the arc
-  (3.6);
-- ALTMOV's line steps (3.11) and Cauchy steps (3.13) to (3.15), and the
-  comparison (3.12);
-- the radius rules (6.4), the short-step rule, (6.6) and (6.7), the usable
-  error estimate (6.8) and the tests (6.10) and (6.11), and the alternative
-  model (6.12);
-- RESCUE's points (5.4) and (5.5), its safety test (5.7), its scores, and
-  the model update (5.12).
+  (3.6), against closed forms and, for any problem, the properties a step
+  must have (a method that never removes an index from its active set is not
+  held to the global minimiser of a bounded or nonconvex problem);
+- ALTMOV's line steps (3.11) and Cauchy steps (3.13) to (3.15), against an
+  independent computation from the explicit Lagrange function;
+- the radius rules (6.4), the short-step rule and (6.6), the shift of origin
+  (6.13), through runs whose trace shows the rule;
+- RESCUE's points (5.4) and (5.5), its safety test (5.7), its scores, and the
+  model update (5.12), the iteration being written out again with an explicit
+  inverse and held to the solver's replacements exactly.
 
-On the report's test problem (7.1), five random instances, the evaluation
-counts are 201 to 316 at `n = 10` and 560 to 709 at `n = 20`, against the
-report's 302 to 427 and 691 to 927 for its own five instances.
+The usable error estimate (6.8), the tests (6.10) and (6.11), the alternative
+model (6.12) and the choice of the replaced point (6.1) are inside the solver
+and leave no trace of their own; they are exercised by every run and not
+pinned one by one.
+
+On the report's test problem (7.1), five instances drawn as the report
+describes, the evaluation counts at `rho_beg = 0.1` and `rho_end = 1e-6`
+stay within a quarter of the greatest count of each row of its Tables 1 to 3,
+and the accuracy within the greatest of the tables. On my instances the counts are
+201 to 316 at `n = 10` and 560 to 709 at `n = 20` with `m = 2n + 1`,
+against the report's 302 to 427 and 691 to 927 for its own five instances.
 
 ## Limits
 
@@ -196,6 +216,15 @@ report's 302 to 427 and 691 to 927 for its own five instances.
   `rho` while `f` decreases, and can reach the cap with
   `MaxEvaluationsReached`. Whether it does depends on the rounding of the
   objective and the compiler.
+- A first step above about `1.3e154`, the square root of the largest double,
+  can hand the objective a NaN coordinate, and an objective multiplied by
+  `1e140` or more, or by `1e-200` or less, can end with `XtolReached` far
+  from the minimiser; powers of two change nothing in the run. An unbounded
+  objective can fail to end under `-ffast-math`.
+- A point can be one rounding error inside a bound it should be on, where
+  the starting point was moved off the bound.
+- With a scalar objective, the starting points are all evaluated even when
+  the second of them is at or below `stop_value`.
 - Storage is `O(m^2 + m n + n^2)`: at `m = (n + 1)(n + 2) / 2` that is
   `O(n^4)`.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

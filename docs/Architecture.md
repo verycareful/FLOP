@@ -34,7 +34,7 @@ facade, never the templates.
 
 Every algorithm takes `flop::Options` (stopping rules, optional box bounds,
 the initial step, an evaluation trace) and returns `flop::Result` (the best
-point, its value, the evaluation count, a `Status`, the final trust radius,
+point, its value, the evaluation count, a `Status`, the final radius (`final_radius`),
 the largest constraint violation). Algorithm-specific settings extend
 `flop::Options` by inheritance, as `flop::bobyqa::Options`,
 `flop::cobyla::Options` and `flop::nelder_mead::Options` do.
