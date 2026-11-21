@@ -15,8 +15,9 @@ fast path. They are constrained by concepts in `flop/concepts.hpp`:
 - `ScalarObjective`: `f(x) -> double` for `std::span<const double> x`.
 - `BatchObjective`: `f(xs, out)` evaluates every point of `xs` and writes one
   value per point. FLOP uses it where an algorithm has independent points to
-  evaluate: COBYLA's initial simplex, Nelder-Mead's initial simplex and
-  each of its shrinks. FLOP never spawns a thread; the caller decides how a
+  evaluate: BOBYQA's starting points and the new points of a RESCUE,
+  COBYLA's initial simplex, Nelder-Mead's initial simplex and each of its
+  shrinks. FLOP never spawns a thread; the caller decides how a
   batch is evaluated.
 - `ConstraintFunction`: `c(x, out)` writes the constraint values, feasible
   when every value is at least zero.
@@ -35,8 +36,8 @@ Every algorithm takes `flop::Options` (stopping rules, optional box bounds,
 the initial step, an evaluation trace) and returns `flop::Result` (the best
 point, its value, the evaluation count, a `Status`, the final trust radius,
 the largest constraint violation). Algorithm-specific settings extend
-`flop::Options` by inheritance, as `flop::cobyla::Options` and
-`flop::nelder_mead::Options` do.
+`flop::Options` by inheritance, as `flop::bobyqa::Options`,
+`flop::cobyla::Options` and `flop::nelder_mead::Options` do.
 
 What more than one algorithm needs lives under `flop/detail/` once:
 `evaluator.hpp` puts the scalar and the batch objective behind one

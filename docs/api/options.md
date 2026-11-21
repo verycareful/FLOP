@@ -28,6 +28,7 @@ the progress each algorithm has:
 
 | | x tolerances | f tolerances |
 |---|---|---|
+| BOBYQA | the lower bound `rho` on the trust-region radius | the fall in `f` across a step that lowers the best value |
 | COBYLA | the trust-region radius `rho` | the fall in `f` across a step that moves the base |
 | Nelder-Mead | the simplex radius | the spread of `f` over the simplex |
 
@@ -60,8 +61,8 @@ struct Options {
 };
 ```
 
-`initial_step` is the first step along each coordinate (COBYLA's `rhobeg`,
-the edge of Nelder-Mead's initial simplex).
+`initial_step` is the first step along each coordinate (BOBYQA's and
+COBYLA's `rhobeg`, the edge of Nelder-Mead's initial simplex).
 The default fits a problem scaled around unity; there is no rule deriving it
 from `x0`.
 

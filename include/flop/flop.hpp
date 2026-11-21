@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "flop/bobyqa.hpp"
 #include "flop/bounds.hpp"
 #include "flop/cobyla.hpp"
 #include "flop/concepts.hpp"

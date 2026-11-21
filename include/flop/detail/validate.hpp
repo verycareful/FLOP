@@ -118,4 +118,32 @@ inline void validate_nelder_mead_range(const char* where, const Options& o,
     }
 }
 
+// BOBYQA's own input rules, after validate_options. The number of
+// interpolation points m is in [n + 2, (n + 1)(n + 2) / 2] (the report's
+// section 1); 0 selects 2n + 1. A coordinate bounded on both sides needs
+// b_i - a_i >= 2 initial_step (2.1), compared as b/2 - a/2 >= h so that
+// the width cannot overflow, unless the caller asked for the step to
+// shrink. A fixed coordinate (a_i = b_i) is refused by validate_bounds.
+template <class BobyqaOptions>
+void validate_bobyqa(const char* where, const BobyqaOptions& o, std::span<const double> x0) {
+    const std::size_t n = x0.size();
+    const std::size_t m = o.interpolation_points;
+    const std::size_t mmax = (n + 1) * (n + 2) / 2;
+    if (m != 0 && (m < n + 2 || m > mmax))
+        fail(where, "interpolation_points is " + std::to_string(m) + "; with " + std::to_string(n) +
+                        " variables it must be 0 (for 2n + 1) or in [" + std::to_string(n + 2) +
+                        ", " + std::to_string(mmax) + "]");
+    if (o.final_trust_radius < 0.0 || fp_bad(o.final_trust_radius))
+        fail(where, "final_trust_radius must be zero or positive and finite");
+    if (!o.bounds || o.shrink_initial_step) return;
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::optional<double>& lo = o.bounds->lower[i];
+        const std::optional<double>& hi = o.bounds->upper[i];
+        if (lo.has_value() && hi.has_value() && 0.5 * *hi - 0.5 * *lo < o.initial_step)
+            fail(where, "the bounds at coordinate " + std::to_string(i) +
+                            " are closer than 2 * initial_step (set shrink_initial_step to "
+                            "shrink the step to fit)");
+    }
+}
+
 }  // namespace flop::detail

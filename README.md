@@ -16,15 +16,16 @@ Fast Library of Optimization Procedures: derivative-free optimizers for
 objectives that are expensive to evaluate, written in C++23 from the
 published algorithms, with no dependency at run time.
 
-Two algorithms so far, both with box bounds, a batch channel for the
+Three algorithms so far, all with box bounds, a batch channel for the
 points they can evaluate independently, and a trace of every evaluation:
 
+- Powell's BOBYQA, a quadratic model updated by least Frobenius norm
+  changes, for bound constrained problems.
 - Powell's COBYLA, with inequality constraints.
 - Nelder-Mead, in the statement of Lagarias, Reeds, Wright and Wright, with
   Gao and Han's coefficients for higher dimensions.
 
-BOBYQA, SPSA and gradient and population methods follow on the same
-interface.
+SPSA and gradient and population methods follow on the same interface.
 
 ## Design in one paragraph
 
@@ -32,7 +33,8 @@ An algorithm is a class template on the objective, so an evaluation inlines
 into the optimizer loop; concepts (`ScalarObjective`, `BatchObjective`,
 `ConstraintFunction`) say what an objective must offer, and an objective that
 lacks a capability fails to compile. One type-erased facade,
-`flop::Minimizer::create("COBYLA")` or `create("NELDER_MEAD")`, serves the
+`flop::Minimizer::create("BOBYQA")`, `create("COBYLA")` or
+`create("NELDER_MEAD")`, serves the
 caller who chooses at run time. A run returns the best point with a `Status` that names why it
 stopped; reaching the evaluation cap is a status, not a success, and there
 is no flag that says otherwise. Every guard survives `-ffast-math`: the

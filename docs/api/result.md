@@ -41,8 +41,8 @@ struct Result {
 `x` is the best point seen, feasible when one was found, and `f` its value.
 `evaluations` counts objective calls, batch points singly. `final_radius` is
 the scale the method had reached when it stopped, the quantity the x
-tolerances act on: COBYLA's trust radius `rho`, Nelder-Mead's simplex
-radius. For Nelder-Mead that is the last simplex whose every vertex was
+tolerances act on: BOBYQA's lower bound `rho` on the trust-region radius,
+COBYLA's trust radius `rho`, Nelder-Mead's simplex radius. For Nelder-Mead that is the last simplex whose every vertex was
 evaluated: a run that ends inside a shrink or a restart reports the
 simplex before it, and one that ends inside its initial simplex reports
 `initial_step`.

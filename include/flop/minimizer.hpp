@@ -39,7 +39,7 @@ public:
         std::function<void(std::span<const std::span<const double>>, std::span<double>)>;
     using Constraints = std::function<void(std::span<const double>, std::span<double>)>;
 
-    // "COBYLA" or "NELDER_MEAD". Case-sensitive. Unknown names throw
+    // "BOBYQA", "COBYLA" or "NELDER_MEAD". Case-sensitive. Unknown names throw
     // std::invalid_argument.
     static Minimizer create(std::string_view name);
     static std::span<const std::string_view> names() noexcept;
@@ -50,14 +50,21 @@ public:
     // algorithm accepts the shared set; a setter for an option the selected
     // algorithm does not have throws std::invalid_argument rather than
     // storing a value nothing would read.
+    //   BOBYQA       set_final_trust_radius (Powell's rhoend),
+    //                set_interpolation_points (m; 0 for 2n + 1),
+    //                set_shrink_initial_step (off by default),
+    //                set_newuoa_weight (on by default)
     //   COBYLA       set_final_trust_radius (Powell's rhoend)
     //   NELDER_MEAD  set_adaptive_coefficients (Gao and Han's, on by default)
     Minimizer& set_final_trust_radius(double rhoend);
     Minimizer& set_adaptive_coefficients(bool adaptive);
+    Minimizer& set_interpolation_points(std::size_t m);
+    Minimizer& set_shrink_initial_step(bool shrink);
+    Minimizer& set_newuoa_weight(bool newuoa);
 
     // The constraint overloads throw std::invalid_argument, before any
     // evaluation, for an algorithm without nonlinear constraints
-    // (NELDER_MEAD).
+    // (BOBYQA, NELDER_MEAD).
     [[nodiscard]] Result minimize(const Objective& f, std::span<const double> x0,
                                   const Options& opts) const;
     [[nodiscard]] Result minimize(const Objective& f, const Constraints& c,

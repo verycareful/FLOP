@@ -22,3 +22,7 @@ target_compile_options(bench_cobyla PRIVATE ${FLOP_WARNING_FLAGS} ${FLOP_STRICT_
 add_executable(bench_nelder_mead bench_nelder_mead.cpp)
 target_link_libraries(bench_nelder_mead PRIVATE flop::flop benchmark::benchmark)
 target_compile_options(bench_nelder_mead PRIVATE ${FLOP_WARNING_FLAGS} ${FLOP_STRICT_FP_FLAGS})
+
+add_executable(bench_bobyqa bench_bobyqa.cpp)
+target_link_libraries(bench_bobyqa PRIVATE flop::flop benchmark::benchmark)
+target_compile_options(bench_bobyqa PRIVATE ${FLOP_WARNING_FLAGS} ${FLOP_STRICT_FP_FLAGS})

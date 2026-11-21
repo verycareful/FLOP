@@ -24,6 +24,9 @@ public:
 
     Minimizer& set_final_trust_radius(double rhoend);
     Minimizer& set_adaptive_coefficients(bool adaptive);
+    Minimizer& set_interpolation_points(std::size_t m);
+    Minimizer& set_shrink_initial_step(bool shrink);
+    Minimizer& set_newuoa_weight(bool newuoa);
 
     Result minimize(const Objective& f, std::span<const double> x0, const Options& opts) const;
     Result minimize(const Objective& f, const Constraints& c, std::size_t n_constraints,
@@ -34,23 +37,26 @@ public:
 };
 ```
 
-`create` accepts `"COBYLA"` and `"NELDER_MEAD"`. It is case-sensitive and
+`create` accepts `"BOBYQA"`, `"COBYLA"` and `"NELDER_MEAD"`. It is case-sensitive and
 throws `std::invalid_argument` on any other name, naming the known ones.
 `names()` lists them.
 
 The setters set an algorithm's own options beyond the shared set and return
-the minimizer for chaining. Each belongs to one algorithm, and calling it on
-another throws `std::invalid_argument` rather than storing a value nothing
-would read:
+the minimizer for chaining. Each belongs to the algorithms listed, and
+calling it on another throws `std::invalid_argument` rather than storing a
+value nothing would read:
 
 | Setter | Algorithm | Option |
 |---|---|---|
-| `set_final_trust_radius` | COBYLA | `cobyla::Options::final_trust_radius` |
+| `set_final_trust_radius` | BOBYQA, COBYLA | `bobyqa::Options::final_trust_radius`, `cobyla::Options::final_trust_radius` |
 | `set_adaptive_coefficients` | NELDER_MEAD | `nelder_mead::Options::adaptive_coefficients` |
+| `set_interpolation_points` | BOBYQA | `bobyqa::Options::interpolation_points` |
+| `set_shrink_initial_step` | BOBYQA | `bobyqa::Options::shrink_initial_step` |
+| `set_newuoa_weight` | BOBYQA | `bobyqa::Options::newuoa_weight` |
 
 The overloads that take constraints throw `std::invalid_argument`, before
 any evaluation, when the algorithm has no nonlinear constraints
-(NELDER_MEAD).
+(BOBYQA, NELDER_MEAD).
 
 A `Minimizer` is movable and not copyable.
 
@@ -59,7 +65,8 @@ A `Minimizer` is movable and not copyable.
 `create` throws `std::invalid_argument` on an unknown name, a setter on an
 algorithm without that option, and a constrained `minimize` on an algorithm
 without constraints. Otherwise the `minimize` overloads throw what the
-underlying algorithm throws (`docs/api/cobyla.md`, `docs/api/nelder_mead.md`).
+underlying algorithm throws (`docs/api/bobyqa.md`, `docs/api/cobyla.md`,
+`docs/api/nelder_mead.md`).
 
 ## Example
 

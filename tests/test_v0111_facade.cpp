@@ -68,7 +68,7 @@ static_assert(std::is_nothrow_move_assignable_v<flop::Minimizer>);
 
 TEST(V0111Facade, NamesListsBothAlgorithmsAndCreateAcceptsNelderMead) {
     const auto names = flop::Minimizer::names();
-    EXPECT_EQ(names.size(), 2u);
+    EXPECT_EQ(names.size(), 3u);
     EXPECT_NE(std::ranges::find(names, std::string_view("COBYLA")), names.end());
     EXPECT_NE(std::ranges::find(names, std::string_view("NELDER_MEAD")), names.end());
     const flop::Minimizer m = flop::Minimizer::create("NELDER_MEAD");
