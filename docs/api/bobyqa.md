@@ -52,8 +52,9 @@ The method takes no nonlinear constraints, and there is no overload for
 them.
 
 Every point evaluated is inside the box. A coordinate the method steps onto
-a bound takes the bound's own value, and `x0` is moved onto a bound, or to
-`initial_step` inside it, when it is closer to the bound than that.
+a bound, or to within four units in the last place of it, takes the bound's
+own value, and `x0` is moved onto a bound, or to `initial_step` inside it,
+when it is closer to the bound than that.
 
 Every entry point returns the best point evaluated with the reason the run
 ended (`docs/api/result.md`). `Result::final_radius` is the lower bound

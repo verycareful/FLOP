@@ -81,10 +81,17 @@ costs `O(m^2)` beyond its evaluation, and a shift of origin `O(m^2 n)`.
   radius becomes `min(initial_step, min_i (b_i - a_i) / 2)` instead. A
   coordinate with `a_i = b_i` is always refused: it is not a variable.
 - **Points on a bound.** The report requires a step onto a bound to put the
-  point exactly on it (after (3.2)). The step routines report which
-  coordinates they placed on which bound, and the point evaluated takes the
-  bound's own value there, so no point is a rounding error away from a
-  bound it should be on, and none is outside the box.
+  point exactly on it (after (3.2)), and moves `x0` to `a_i + Delta` or
+  `b_i - Delta` when it is closer to the bound than that (page 5, before
+  (2.2)). The step routines report which coordinates they placed on which
+  bound, and the point evaluated takes the bound's own value there. Where
+  `x0` was moved, the bound is exactly `Delta` away from the moved `x0` as
+  an offset, so `x0 - Delta e_i` is the bound itself and not the rounding of
+  it. A point within four units in the last place of a bound also takes the
+  bound's value: the origin moves by rounded shifts, and a coordinate on a
+  bound whose model gradient is rounding noise steps by about that much. So
+  no point is a rounding error away from a bound it should be on, and none
+  is outside the box.
 - **TRSBOX's search round the boundary.** The report finds `theta_B` and
   `theta_Q` "approximately". FLOP computes `theta_B` in closed form: each
   coordinate of `d(theta)` is a sinusoid, which reaches a bound at
@@ -221,8 +228,6 @@ against the report's 302 to 427 and 691 to 927 for its own five instances.
   `1e140` or more, or by `1e-200` or less, can end with `XtolReached` far
   from the minimiser; powers of two change nothing in the run. An unbounded
   objective can fail to end under `-ffast-math`.
-- A point can be one rounding error inside a bound it should be on, where
-  the starting point was moved off the bound.
 - Storage is `O(m^2 + m n + n^2)`: at `m = (n + 1)(n + 2) / 2` that is
   `O(n^4)`.
 - With `-ffinite-math-only` in the caller's translation unit, a NaN the

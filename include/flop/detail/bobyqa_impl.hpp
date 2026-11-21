@@ -127,6 +127,29 @@ constexpr double kWeightDelta = 0.1;
 constexpr double kCurvatureFactor = 0.125;
 // (6.8): the three most recent values.
 constexpr std::size_t kErrorHistory = 3;
+// A point within this many units in the last place of a bound is the bound.
+// The origin moves by rounded shifts, and a coordinate on a bound whose
+// model gradient is rounding noise (a component of about 1e-16 where the
+// minimiser lies on the face) steps by about that much: such a point is a
+// rounding error away from a bound it should be on, not a point of its own.
+constexpr double kBoundUlps = 4.0;
+
+// The spacing of the doubles at and above |v|.
+[[nodiscard]] inline double ulp_above(double v) noexcept {
+    const double a = std::fabs(v);
+    if (a < std::numeric_limits<double>::min()) return std::numeric_limits<double>::denorm_min();
+    return std::ldexp(std::numeric_limits<double>::epsilon(), std::ilogb(a));
+}
+
+// Whether x is within kBoundUlps units in the last place of the finite bound.
+// Only coordinates of one sign (or a zero) are compared, so the difference
+// cannot overflow.
+[[nodiscard]] inline bool within_bound_ulps(double x, double bound) noexcept {
+    const double ax = std::fabs(x), ab = std::fabs(bound);
+    if (ax != 0.0 && ab != 0.0 && std::signbit(x) != std::signbit(bound)) return false;
+    const double gap = ax >= ab ? ax - ab : ab - ax;
+    return gap <= kBoundUlps * ulp_above(ab);
+}
 
 template <class Eval>
 class Solver {
@@ -273,8 +296,10 @@ private:
                     "flop::bobyqa: a trial point has a coordinate beyond the largest double; the "
                     "objective may be unbounded below");
             x[i] = b + d;
-            if (box_.has_lo[i] && x[i] < abs_lo_[i]) x[i] = abs_lo_[i];
-            if (box_.has_hi[i] && x[i] > abs_hi_[i]) x[i] = abs_hi_[i];
+            if (box_.has_lo[i] && (x[i] < abs_lo_[i] || within_bound_ulps(x[i], abs_lo_[i])))
+                x[i] = abs_lo_[i];
+            if (box_.has_hi[i] && (x[i] > abs_hi_[i] || within_bound_ulps(x[i], abs_hi_[i])))
+                x[i] = abs_hi_[i];
         }
     }
 
@@ -351,9 +376,14 @@ private:
             if (box_.has_hi[i] && xbase_[i] < hi && xbase_[i] > hi - rhobeg_)
                 xbase_[i] = hi - rhobeg_;
         }
+        // Where x0 is Delta inside a bound, the bound is exactly Delta away
+        // as an offset, so that x0 -+ Delta e_i is the bound itself and not
+        // the bound's offset rounded from the rounded x0.
         for (std::size_t i = 0; i < n_; ++i) {
-            if (box_.has_lo[i]) box_.lo[i] = abs_lo_[i] - xbase_[i];
-            if (box_.has_hi[i]) box_.hi[i] = abs_hi_[i] - xbase_[i];
+            if (box_.has_lo[i])
+                box_.lo[i] = xbase_[i] == abs_lo_[i] + rhobeg_ ? -rhobeg_ : abs_lo_[i] - xbase_[i];
+            if (box_.has_hi[i])
+                box_.hi[i] = xbase_[i] == abs_hi_[i] - rhobeg_ ? rhobeg_ : abs_hi_[i] - xbase_[i];
         }
         // (2.2): alpha_i and beta_i for each coordinate.
         const std::span<double> alpha = work_, beta = work2_;
